@@ -101,10 +101,19 @@ func newS3Storage(ctx context.Context, opts Options) (*S3, error) {
 		return nil, err
 	}
 
+	// Setting S3DisableContentMD5Validation breaks `Delete`
+	// operations, so we don't set it on the API client. The API
+	// client will not be used to send large amounts of data, so
+	// we're fine paying the cost of hashing there, anyways.
+	dataSvc := s3.New(awsSession, aws.NewConfig().WithS3DisableContentMD5Validation(true))
+	dataSvc.Handlers.Sign.PushFront(func(r *request.Request) {
+		r.HTTPRequest.Header.Add("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+	})
+
 	return &S3{
 		api:                    s3.New(awsSession),
-		downloader:             s3manager.NewDownloader(awsSession),
-		uploader:               s3manager.NewUploader(awsSession),
+		downloader:             s3manager.NewDownloaderWithClient(dataSvc),
+		uploader:               s3manager.NewUploaderWithClient(dataSvc),
 		endpointURL:            endpointURL,
 		dryRun:                 opts.DryRun,
 		useListObjectsV1:       opts.UseListObjectsV1,
