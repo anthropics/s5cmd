@@ -7,6 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
+	"math/big"
+	"net/http"
+	urlpkg "net/url"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
@@ -18,16 +29,6 @@ import (
 	"github.com/aws/smithy-go/logging"
 	"github.com/peak/s5cmd/log"
 	url "github.com/peak/s5cmd/storage/url"
-	"io"
-	"math"
-	"math/big"
-	"net/http"
-	urlpkg "net/url"
-	"os"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 )
 
 var sentinelURL = urlpkg.URL{}
@@ -375,7 +376,7 @@ func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 		URL:     url,
 		Etag:    strings.Trim(etag, `"`),
 		ModTime: &mod,
-		Size:    aws.ToInt64(&output.ContentLength),
+		Size:    aws.ToInt64(output.ContentLength),
 	}
 	if s.noSuchUploadRetryCount > 0 {
 		if retryID, ok := output.Metadata[metadataKeyRetryID]; ok {
@@ -468,7 +469,7 @@ func (s *S3) listObjectsV2(ctx context.Context, url *url.URL) <-chan *Object {
 					Etag:         strings.Trim(etag, `"`),
 					ModTime:      &mod,
 					Type:         ObjectType{mode: objtype},
-					Size:         c.Size,
+					Size:         aws.ToInt64(c.Size),
 					StorageClass: StorageClass(c.StorageClass),
 				}
 
@@ -558,7 +559,7 @@ func (s *S3) listObjects(ctx context.Context, url *url.URL) <-chan *Object {
 					Etag:         strings.Trim(etag, `"`),
 					ModTime:      &mod,
 					Type:         ObjectType{mode: objtype},
-					Size:         c.Size,
+					Size:         aws.ToInt64(c.Size),
 					StorageClass: StorageClass(c.StorageClass),
 				}
 
@@ -609,8 +610,8 @@ func NewListObjectsPaginator(client ListObjectsAPIClient, params *s3.ListObjects
 	}
 
 	options := ListObjectsPaginatorOptions{}
-	if params.MaxKeys != 0 {
-		options.Limit = params.MaxKeys
+	if aws.ToInt32(params.MaxKeys) != 0 {
+		options.Limit = *params.MaxKeys
 	}
 
 	for _, fn := range optFns {
@@ -640,7 +641,7 @@ func (p *ListObjectsPaginator) NextPage(ctx context.Context, optFns ...func(*s3.
 	params := *p.params
 	params.Marker = p.nextMarker
 
-	params.MaxKeys = p.options.Limit
+	params.MaxKeys = aws.Int32(p.options.Limit)
 
 	result, err := p.client.ListObjects(ctx, &params, optFns...)
 	if err != nil {
@@ -650,7 +651,7 @@ func (p *ListObjectsPaginator) NextPage(ctx context.Context, optFns ...func(*s3.
 
 	prevToken := p.nextMarker
 	p.nextMarker = nil
-	if result.IsTruncated {
+	if aws.ToBool(result.IsTruncated) {
 		p.nextMarker = result.NextMarker
 	}
 
