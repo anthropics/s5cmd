@@ -90,6 +90,10 @@ var app = &cli.App{
 			Name:  "credentials-file",
 			Usage: "use the specified credentials file instead of the default credentials file",
 		},
+		&cli.StringFlag{
+			Name:  "auth-bearer-token",
+			Usage: "for unsigned requests, inject the authorization bearer token as a request header",
+		},
 	},
 	Before: func(c *cli.Context) error {
 		retryCount := c.Int("retry-count")
@@ -114,6 +118,11 @@ var app = &cli.App{
 		}
 		if c.Bool("no-sign-request") && c.String("credentials-file") != "" {
 			err := fmt.Errorf(`"no-sign-request" and "credentials-file" flags cannot be used together`)
+			printError(commandFromContext(c), c.Command.Name, err)
+			return err
+		}
+		if c.String("auth-bearer-token") != "" && !c.Bool("no-sign-request") {
+			err := fmt.Errorf(`"auth-bearer-token" can only be used with "no-sign-request"`)
 			printError(commandFromContext(c), c.Command.Name, err)
 			return err
 		}
@@ -190,6 +199,7 @@ func NewStorageOpts(c *cli.Context) storage.Options {
 		CredentialFile:         c.String("credentials-file"),
 		LogLevel:               log.LevelFromString(c.String("log")),
 		NoSuchUploadRetryCount: c.Int("no-such-upload-retry-count"),
+		AuthBearerToken:        c.String("auth-bearer-token"),
 	}
 }
 

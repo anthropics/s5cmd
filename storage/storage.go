@@ -12,6 +12,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws/request"
+	s3sdk "github.com/aws/aws-sdk-go/service/s3"
 	"github.com/lanrat/extsort"
 	"github.com/peak/s5cmd/v2/log"
 	"github.com/peak/s5cmd/v2/storage/url"
@@ -75,7 +77,16 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, erro
 		bucket:                 url.Bucket,
 		region:                 opts.region,
 	}
-	return newS3Storage(ctx, newOpts)
+	s3, err := newS3Storage(ctx, newOpts)
+
+	if opts.AuthBearerToken != "" {
+		api := s3.api.(*s3sdk.S3)
+		bearer := fmt.Sprintf("Bearer %s", opts.AuthBearerToken)
+		api.Handlers.Build.PushBack(func(r *request.Request) {
+			r.HTTPRequest.Header.Set("Authorization", bearer)
+		})
+	}
+	return s3, err
 }
 
 func NewClient(ctx context.Context, url *url.URL, opts Options) (Storage, error) {
@@ -100,6 +111,7 @@ type Options struct {
 	CredentialFile         string
 	bucket                 string
 	region                 string
+	AuthBearerToken        string
 }
 
 func (o *Options) SetRegion(region string) {
