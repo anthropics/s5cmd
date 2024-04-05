@@ -18,7 +18,8 @@ const (
 	defaultWorkerCount = 256
 	defaultRetryCount  = 10
 
-	appName = "s5cmd"
+	appName     = "s5cmd"
+	gcsEndpoint = "https://storage.googleapis.com"
 )
 
 var app = &cli.App{
@@ -90,6 +91,10 @@ var app = &cli.App{
 			Name:  "credentials-file",
 			Usage: "use the specified credentials file instead of the default credentials file",
 		},
+		&cli.BoolFlag{
+			Name:  "auth-google-adc",
+			Usage: "inject the authorization bearer token as a request header using Google Application Default Credentials. Set automatically if a file URI starts with gs:// and no endpoint is set",
+		},
 	},
 	Before: func(c *cli.Context) error {
 		retryCount := c.Int("retry-count")
@@ -97,7 +102,6 @@ var app = &cli.App{
 		printJSON := c.Bool("json")
 		logLevel := c.String("log")
 		isStat := c.Bool("stat")
-		endpointURL := c.String("endpoint-url")
 
 		log.Init(logLevel, printJSON)
 		parallel.Init(workerCount)
@@ -107,13 +111,58 @@ var app = &cli.App{
 			printError(commandFromContext(c), c.Command.Name, err)
 			return err
 		}
-		if c.Bool("no-sign-request") && c.String("profile") != "" {
-			err := fmt.Errorf(`"no-sign-request" and "profile" flags cannot be used together`)
+		var hasGs bool = false
+		var hasS3 bool = false
+		for _, arg := range c.Args().Slice() {
+
+			if strings.HasPrefix(arg, "gs://") {
+				hasGs = true
+			} else if strings.HasPrefix(arg, "s3://") {
+				hasS3 = true
+			}
+		}
+
+		if hasGs && hasS3 {
+			err := fmt.Errorf(`"gs://" and "s3://" URIs cannot be used together`)
+			printError(commandFromContext(c), c.Command.Name, err)
+			return err
+		} else if hasGs && !c.Bool("auth-google-adc") && c.String("endpoint-url") == "" {
+			msg := log.DebugMessage{
+				Command:   commandFromContext(c),
+				Operation: c.Command.Name,
+				Err:       fmt.Sprintf(`Detected Google Cloud Storage URL, setting "auth-google-adc" and "endpoint-url"=%v`, gcsEndpoint),
+			}
+			log.Debug(msg)
+			// enable all of the flags that are required for making requests to Google Cloud Storage
+			c.Set("auth-google-adc", "true")
+			c.Set("endpoint-url", gcsEndpoint)
+		}
+
+		// Pass no credentials to the AWS client- all bools
+		noCredentialsFlags := []string{"auth-google-adc", "no-sign-request"}
+		// Pass specific credents to the AWS client - all strings
+		credentialsFlags := []string{"profile", "credentials-file"}
+
+		for _, noCredentialsflag := range noCredentialsFlags {
+			for _, credentialsFlag := range credentialsFlags {
+				if c.Bool(noCredentialsflag) && c.String(credentialsFlag) != "" {
+					err := fmt.Errorf(`"%s" and "%s" flags cannot be used together`, noCredentialsflag, credentialsFlag)
+					printError(commandFromContext(c), c.Command.Name, err)
+					return err
+				}
+			}
+		}
+
+		if c.Bool("auth-google-adc") && c.Bool("no-sign-request") {
+			err := fmt.Errorf(`"auth-google-adc" and "no-sign-requests" flags cannot be used together (usually you want to use "auth-google-adc" by itself)`)
 			printError(commandFromContext(c), c.Command.Name, err)
 			return err
 		}
-		if c.Bool("no-sign-request") && c.String("credentials-file") != "" {
-			err := fmt.Errorf(`"no-sign-request" and "credentials-file" flags cannot be used together`)
+
+		endpointURL := c.String("endpoint-url")
+		if c.Bool("auth-google-adc") && endpointURL != gcsEndpoint {
+			fmt.Printf("endpoint-url: %s\n", endpointURL)
+			err := fmt.Errorf(`"auth-google-adc" can only be used with --endpoint-url="%s"`, gcsEndpoint)
 			printError(commandFromContext(c), c.Command.Name, err)
 			return err
 		}
@@ -190,6 +239,7 @@ func NewStorageOpts(c *cli.Context) storage.Options {
 		CredentialFile:         c.String("credentials-file"),
 		LogLevel:               log.LevelFromString(c.String("log")),
 		NoSuchUploadRetryCount: c.Int("no-such-upload-retry-count"),
+		AuthGoogleADC:          c.Bool("auth-google-adc"),
 	}
 }
 
@@ -226,6 +276,5 @@ func AppCommand(name string) *cli.Command {
 // Main is the entrypoint function to run given commands.
 func Main(ctx context.Context, args []string) error {
 	app.Commands = Commands()
-
 	return app.RunContext(ctx, args)
 }

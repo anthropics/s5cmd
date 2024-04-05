@@ -33,6 +33,8 @@ import (
 
 	"github.com/peak/s5cmd/v2/log"
 	"github.com/peak/s5cmd/v2/storage/url"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 var sentinelURL = urlpkg.URL{}
@@ -1176,6 +1178,55 @@ type SessionCache struct {
 	sessions map[Options]*session.Session
 }
 
+type GoogleAuthRoundTripper struct {
+	tokenSource oauth2.TokenSource
+	transport   http.RoundTripper
+}
+
+func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client) (*http.Client, error) {
+	if baseClient == nil {
+		baseClient = http.DefaultClient
+	}
+	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
+		msg := log.ErrorMessage{
+			Command: "google.FindDefaultCredentials",
+			Err:     "Could not load creds",
+		}
+		log.Error(msg)
+		return nil, err
+	}
+
+	// Create a token source that reuses the token from the default credentials, caches responses, and refreshes the token as needed
+	tokenSource := oauth2.ReuseTokenSource(nil, creds.TokenSource)
+	var transport = baseClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+
+	return &http.Client{
+		Transport: &GoogleAuthRoundTripper{
+			transport:   transport,
+			tokenSource: tokenSource,
+		},
+	}, nil
+}
+
+func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	token, err := c.tokenSource.Token()
+	if err != nil {
+		msg := log.ErrorMessage{
+			Command: "tokenSource.Token",
+			Err:     "Could not load token - ensure you're logged in",
+		}
+		log.Error(msg)
+	} else {
+		bearer := fmt.Sprintf("Bearer %s", token.AccessToken)
+		req.Header.Set("Authorization", bearer)
+	}
+	return c.transport.RoundTrip(req)
+}
+
 // newSession initializes a new AWS session with region fallback and custom
 // options.
 func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.Session, error) {
@@ -1218,6 +1269,13 @@ func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.
 	if opts.NoVerifySSL {
 		httpClient = insecureHTTPClient
 	}
+	if opts.AuthGoogleADC {
+		httpClient, err = newGoogleAuthenticationClient(ctx, httpClient)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	awsCfg = awsCfg.
 		WithEndpoint(endpointURL.String()).
 		WithS3ForcePathStyle(!isVirtualHostStyle).
