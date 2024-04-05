@@ -111,8 +111,8 @@ var app = &cli.App{
 			printError(commandFromContext(c), c.Command.Name, err)
 			return err
 		}
-		var hasGs bool = false
-		var hasS3 bool = false
+		var hasGs = false
+		var hasS3 = false
 		for _, arg := range c.Args().Slice() {
 
 			if strings.HasPrefix(arg, "gs://") {
