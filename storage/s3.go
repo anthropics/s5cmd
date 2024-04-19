@@ -1213,6 +1213,17 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 }
 
 func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	// TODO: Verify that all headers are written correctly from https://cloud.google.com/storage/docs/migrating
+	for key, values := range req.Header {
+		oldKey := key
+		newKey := strings.Replace(strings.ToLower(oldKey), "x-amz", "x-goog", -1)
+		for i := range values {
+			values[i] = strings.Replace(values[i], "gs%3A//", "", -1)
+		}
+		req.Header.Del(oldKey)
+		req.Header[newKey] = values
+	}
+
 	token, err := c.tokenSource.Token()
 	if err != nil {
 		msg := log.ErrorMessage{
@@ -1223,10 +1234,6 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	} else {
 		token.SetAuthHeader(req)
 	}
-	// TODO: Let's rewrite all headers from https://cloud.google.com/storage/docs/migrating
-	val := req.Header.Get("X-Amz-Copy-Source")
-	req.Header.Set("X-Goog-Copy-Source", strings.TrimPrefix(val, "gs%3A//"))
-	req.Header.Del("X-Amz-Copy-Source")
 
 	return c.transport.RoundTrip(req)
 }
