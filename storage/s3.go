@@ -1221,9 +1221,13 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 		}
 		log.Error(msg)
 	} else {
-		bearer := fmt.Sprintf("Bearer %s", token.AccessToken)
-		req.Header.Set("Authorization", bearer)
+		token.SetAuthHeader(req)
 	}
+	// TODO: Let's rewrite all headers from https://cloud.google.com/storage/docs/migrating
+	val := req.Header.Get("X-Amz-Copy-Source")
+	req.Header.Set("X-Goog-Copy-Source", strings.TrimPrefix(val, "gs%3A//"))
+	req.Header.Del("X-Amz-Copy-Source")
+
 	return c.transport.RoundTrip(req)
 }
 
