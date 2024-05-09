@@ -2282,11 +2282,30 @@ func runCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T, tc *testCase
 }
 
 // cp --flatten s3://bucket/object s3://bucket2/
+
 func TestFlattenCopySingleS3ObjectIntoAnotherBucket(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runFlattenCopySingleObjectIntoAnotherBucket(t, &tc)
+		})
+	}
+}
+
+func runFlattenCopySingleObjectIntoAnotherBucket(t *testing.T, tc *testCase) {
 	t.Parallel()
 
-	srcbucket := s3BucketFromTestName(t)
-	dstbucket := s3BucketFromTestNameWithPrefix(t, "copy")
+	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
+	dstbucket := s3BucketFromTestNameWithPrefix(t, "dst")
 
 	s3client, s5cmd := setup(t)
 
@@ -2294,14 +2313,16 @@ func TestFlattenCopySingleS3ObjectIntoAnotherBucket(t *testing.T) {
 	createBucket(t, s3client, dstbucket)
 
 	const (
-		filename = "testfile1.txt"
-		content  = "this is a file content"
+		filename1 = "testfile1.txt"
+		filename2 = "nested/nested/testfile2.txt"
+		content   = "this is a file content"
 	)
 
-	putFile(t, s3client, srcbucket, filename, content)
+	putFile(t, s3client, srcbucket, filename1, content)
+	putFile(t, s3client, srcbucket, filename2, content)
 
-	src := fmt.Sprintf("s3://%v/%v", srcbucket, filename)
-	dst := fmt.Sprintf("s3://%v/", dstbucket)
+	src := fmt.Sprintf("%s://%v/", tc.storage, srcbucket)
+	dst := fmt.Sprintf("%s://%v/", tc.storage, dstbucket)
 
 	cmd := s5cmd("cp", "--flatten", src, dst)
 	result := icmd.RunCmd(cmd)
@@ -2309,14 +2330,18 @@ func TestFlattenCopySingleS3ObjectIntoAnotherBucket(t *testing.T) {
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v %v%v`, src, dst, filename),
-	})
+		0: equals(`cp %v%v %v%v`, src, filename1, dst, filename1),
+		1: equals(`cp %v%v %v%v`, src, filename2, dst, "testfile2.txt"),
+	}, sortInput(true))
 
-	// assert s3 source object
-	assert.Assert(t, ensureS3Object(s3client, srcbucket, filename, content))
+	// assert s3 source objects
+	assert.Assert(t, ensureS3Object(s3client, srcbucket, filename1, content))
+	assert.Assert(t, ensureS3Object(s3client, srcbucket, filename2, content))
 
-	// assert s3 destination object
-	assert.Assert(t, ensureS3Object(s3client, dstbucket, filename, content))
+	// assert s3 destination objects
+	assert.Assert(t, ensureS3Object(s3client, dstbucket, filename1, content))
+	assert.Assert(t, ensureS3Object(s3client, dstbucket, "testfile2.txt", content))
+	assert.Assert(t, notS3Object(s3client, dstbucket, filename2))
 }
 
 // cp s3://bucket/object s3://bucket2/object
