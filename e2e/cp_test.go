@@ -896,57 +896,72 @@ func TestCopySingleFileToS3WithAllMetadataFlags(t *testing.T) {
 }
 
 // cp dir/file s3://bucket/ --metadata key1=val1 --metadata key2=val2 ...
+
 func TestCopySingleFileToS3WithArbitraryMetadata(t *testing.T) {
 	t.Parallel()
+	t.Run("CopySingleFileToS3WithArbitraryMetadata", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				t.Parallel()
 
-	s3client, s5cmd := setup(t)
+				const (
+					filename = "testfile1.txt"  
+					content  = "this is a test file"
+				)
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+				metadata := map[string]string{
+					"key1": "val1",
+					"key2": "val2", 
+					"key3": "val3",
+				}
 
-	const (
-		// make sure that Put reads the file header and guess Content-Type correctly.
-		filename = "index"
-		content  = `
-<html lang="en">
-	<head>
-	<meta charset="utf-8">
-	<body>
-		<div id="foo">
-			<div class="bar"></div>
-		</div>
-		<div id="baz">
-			<style data-hey="naber"></style>
-		</div>
-	</body>
-</html>
-`
-		foo = "Key1=foo"
-		bar = "Key2=bar"
-	)
+				bucket := s3BucketFromTestName(t)
 
-	// build assert map
-	metadata := map[string]*string{
-		"Key1": aws.String("foo"),
-		"Key2": aws.String("bar"),
-	}
-	workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
-	defer workdir.Remove()
+				s3client, s5cmd := setup(t)
 
-	srcpath := workdir.Join(filename)
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
+				createBucket(t, s3client, bucket)
 
-	srcpath = filepath.ToSlash(srcpath)
-	cmd := s5cmd("cp", "--metadata", foo, "--metadata", bar, srcpath, dstpath)
-	result := icmd.RunCmd(cmd)
-	result.Assert(t, icmd.Success)
+				workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
+				defer workdir.Remove()
 
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+				srcpath := workdir.Join(filename)
+				dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
-	// assert S3
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content, ensureArbitraryMetadata(metadata)))
+				srcpath = filepath.ToSlash(srcpath)
+
+				var metaFlags []string
+				for name, value := range metadata {
+					metaFlags = append(metaFlags, "--metadata", name+"="+value)
+				}
+
+				cmd := s5cmd(append([]string{"cp", srcpath, dstpath}, metaFlags...)...)
+				result := icmd.RunCmd(cmd)
+
+				result.Assert(t, icmd.Success)
+
+				assertLines(t, result.Stdout(), map[int]compareFunc{
+					0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+				}, jsonCheck(true))
+
+				// assert local filesystem
+				expected := fs.Expected(t, fs.WithFile(filename, content))
+				assert.Assert(t, fs.Equal(workdir.Path(), expected))
+
+				obj := getObject(t, s3client, bucket, filename)
+
+				// assert s3 object metadata
+				if tc.storage == "s3" {
+					for k, v := range metadata {
+						assert.Equal(t, obj.Metadata.Get(k), v)
+					}
+				} else {
+					assert.DeepEqual(t, obj.Metadata, metadata)
+				}
+			})
+		}
+	})
+}
 }
 
 // cp s3://bucket2/obj2 s3://bucket1/obj1 --metadata key1=val1 --metadata key2=val2 ...
