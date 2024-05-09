@@ -4996,25 +4996,48 @@ func TestVersionedDownload(t *testing.T) {
 
 // Before downloading a file from s3 a local target file is created. If download
 // fails the created file should be deleted.
-func TestDeleteFileWhenDownloadFailed(t *testing.T) {
-	t.Parallel()
 
-	s3client, s5cmd := setup(t)
+func TestDeleteFileWhenDownloadFailed(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "S3", storage: "s3"},
+		{name: "GCS", storage: "gs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runDeleteFileWhenDownloadFailed(t, &tc)
+		})
+	}
+}
+
+func runDeleteFileWhenDownloadFailed(t *testing.T, tc *testCase) {
+	_, s5cmd := setup(t)
 
 	bucket := s3BucketFromTestName(t)
-	filename := "testfile1.txt"
-	createBucket(t, s3client, bucket)
 
-	// It is going try downloading a nonexistent file from the s3 so it will fail.
-	// In this case we don't expect to have a local file with the name `filename`.
-	cmd := s5cmd("cp", "s3://"+bucket+"/"+filename, filename)
+	keyname := "testfile.txt"
+
+	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+keyname, keyname)
 	result := icmd.RunCmd(cmd)
 
-	result.Assert(t, icmd.Expected{ExitCode: 1})
+	result.Assert(t, icmd.Expected{
+		ExitCode: 1,
+	})
 
-	// assert local filesystem does not have any (such) file
-	expected := fs.Expected(t)
-	assert.Assert(t, fs.Equal(cmd.Dir, expected))
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: contains(`ERROR "cp %v://%v/testfile.txt testfile.txt": Get "%v://%v/testfile.txt": %v`, 
+			tc.storage, bucket, tc.storage, bucket, errS3NoSuchBucket),
+	}, strictLineCheck(false))
+
+	// expect no file to be created.
+	if _, err := os.Stat(keyname); err == nil {
+		t.Fatalf("file found in working directory: %v", keyname)
+	}
 }
 
 // Target local file should be overriden only if download completed successfully
