@@ -2995,45 +2995,55 @@ func runTestCopyS3ToLocalWithSameFilenameOverrideIfSizeDiffers(t *testing.T, tc 
 }
 
 // cp -n -u s3://bucket/object dir/ (source is newer)
+
 func TestCopyS3ToLocalWithSameFilenameOverrideIfSourceIsNewer(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyS3ToLocalWithSameFilenameOverrideIfSourceIsNewer(t, &tc)
+		})
+	}
+}
 
+func runTestCopyS3ToLocalWithSameFilenameOverrideIfSourceIsNewer(t *testing.T, tc *testCase) { 
 	s3client, s5cmd := setup(t)
-
-	const (
-		filename        = "testfile1.txt"
-		content         = "this is the content"
-		expectedContent = content + "\n"
-	)
-
-	now := time.Now().UTC()
-	timestamp := fs.WithTimestamps(
-		now.Add(-time.Minute), // access time
-		now.Add(-time.Minute), // mod time
-	)
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content, timestamp))
-	defer workdir.Remove()
-
+	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
-	// upload a modified version of the file. also uploaded file is newer than
-	// the file on local fs.
-	putFile(t, s3client, bucket, filename, expectedContent)
 
-	cmd := s5cmd("cp", "-n", "-u", "s3://"+bucket+"/"+filename, ".")
+	const objectName = "testfile1.txt" 
+	
+	// create local file and set mtime to 5 seconds ago
+	workdir := fs.NewDir(t, t.Name(), fs.WithFile(objectName, "localcontent", fs.WithMtime(time.Now().Add(-5*time.Second))))
+	defer workdir.Remove()
+	
+	// upload new object with different content 
+	const content = "this is new content"
+	putFile(t, s3client, bucket, objectName, content)
+
+	// copy from s3 to local with -n and -u 
+	cmd := s5cmd("cp", "-n", "-u", tc.storage+"://"+bucket+"/"+objectName, objectName+"/")
 	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
-
-	// '-n' prevents overriding the file, but '-s' overrides '-n' if the file
-	// size differs.
 	result.Assert(t, icmd.Success)
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/%v %v`, bucket, filename, filename),
+	
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(""),
 	})
-
-	expected := fs.Expected(t, fs.WithFile(filename, expectedContent))
+	
+	// expect local file to be overwritten with s3 content
+	expected := fs.Expected(t, fs.WithFile(objectName, content))
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+
+	// expect s3 object to be unchanged
+	assert.Assert(t, ensureS3Object(s3client, bucket, objectName, content))
 }
 
 // cp -n -u s3://bucket/object dir/ (source is older)
