@@ -4840,28 +4840,39 @@ func runTestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilter(t *testing.T, 
 	}
 }
 
+
 func TestCopyExpectExitCode1OnUnreachableHost(t *testing.T) {
-	t.Parallel()
-
-	const bucket = "bucket"
-
-	_, s5cmd := setup(t, withEndpointURL("nonExistingEndpointURL"))
-
-	folderLayout := []fs.PathOp{
-		fs.WithFile("testfile.txt", "this is a test file 1"),
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "S3", storage: "s3"},
+		{name: "GCS", storage: "gs"},
 	}
 
-	workdir := fs.NewDir(t, "somedir", folderLayout...)
-	defer workdir.Remove()
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runCopyExpectExitCode1OnUnreachableHost(t, &tc)
+		})
+	}
+}
 
-	src := fmt.Sprintf("s3://%s/*", bucket)
-	src = filepath.ToSlash(src)
-	dst := fmt.Sprintf("%v/", workdir.Path())
+func runCopyExpectExitCode1OnUnreachableHost(t *testing.T, tc *testCase) {
+	_, s5cmd := setup(t)
 
-	cmd := s5cmd("-r", "0", "cp", src, dst)
+	bucket := "example"
+	filename := "file"
+
+	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Expected{ExitCode: 1})
+
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: contains(`ERROR "cp %v://%v/%v .": Get "%v://%v/%v": dial tcp: lookup %v`, tc.storage, bucket, filename, tc.storage, bucket, filename, bucket),
+	})
 }
 
 func TestCopySingleFileToS3WithNoSuchUploadRetryCount(t *testing.T) {
