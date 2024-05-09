@@ -3365,53 +3365,72 @@ func runTestMultipleLocalFileToS3Bucket(t *testing.T, tc *testCase) {
 }
 
 // cp * s3://bucket/prefix/
-
 func TestCopyMultipleLocalNestedFilesToS3(t *testing.T) {
+	t.Parallel()
 
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			runTestCopyMultipleLocalNestedFilesToS3(t, &tc)
-		})
-	}
-}
-
-func runTestCopyMultipleLocalNestedFilesToS3(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
+
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	filesToContent := map[string]string{
-		filepath.Join("dir1", "file1.txt"):         "file1 content",
-		filepath.Join("dir1", "file2.txt"):         "file2 content",
-		filepath.Join("dir1", "dir2", "file3.txt"): "file3 content",
-		filepath.Join("dir1", "dir2", "file4.txt"): "file4 content",
+	// nested folder layout
+	//
+	// ├─a
+	// │ ├─readme.md
+	// │ └─file1.txt
+	// └─b
+	//   └─c
+	//     └─file2.txt
+	//
+	// after `s5cmd cp * s3://bucket/prefix/`, expect:
+	//
+	// prefix
+	//  ├─a
+	//  │ ├─readme.md
+	//  │ └─file1.txt
+	//  └─b
+	//    └─c
+	//      └─file2.txt
+
+	folderLayout := []fs.PathOp{
+		fs.WithDir(
+			"a",
+			fs.WithFile("file1.txt", "file1"),
+			fs.WithFile("readme.md", "readme"),
+		),
+		fs.WithDir(
+			"b",
+			fs.WithDir(
+				"c",
+				fs.WithFile("file2.txt", "file2"),
+			),
+		),
 	}
 
-	dir := t.TempDir()
-	for filename, content := range filesToContent {
-		assert.NilError(t, os.MkdirAll(filepath.Dir(filename), os.ModePerm))
-		assert.NilError(t, ioutil.WriteFile(filepath.Join(dir, filename), []byte(content), 0644))
-	}
+	workdir := fs.NewDir(t, t.Name(), folderLayout...)
+	defer workdir.Remove()
 
-	cmd := s5cmd("cp", filepath.Join(dir, "*"), tc.storage+"://"+bucket+"/prefix/")
-	result := icmd.RunCmd(cmd)
+	dst := fmt.Sprintf("s3://%v/prefix/", bucket)
+
+	cmd := s5cmd("cp", "*", dst)
+	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
+
 	result.Assert(t, icmd.Success)
 
-	// assert all uploaded objects
-	expected := []string{
-		"prefix/dir1/file1.txt",
-		"prefix/dir1/file2.txt",
-		"prefix/dir1/dir2/file3.txt",
-		"prefix/dir1/dir2/file4.txt",
-	}
-	assert.Assert(t, ensureS3Objects(s3client, bucket, expected...))
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals("cp a/file1.txt %va/file1.txt", dst),
+		1: equals("cp a/readme.md %va/readme.md", dst),
+		2: equals("cp b/c/file2.txt %vb/c/file2.txt", dst),
+	}, sortInput(true))
 
-	// assert content
-	for s3obj, expectedContent := range filesToContent {
-		assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+s3obj, expectedContent))
-	}
+	// assert local filesystem
+	expected := fs.Expected(t, folderLayout...)
+	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+
+	// assert s3 objects
+	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/a/readme.md", "readme"))
+	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/a/file1.txt", "file1"))
+	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/b/c/file2.txt", "file2"))
 }
 
 // cp --no-follow-symlinks my_link s3://bucket/prefix/
