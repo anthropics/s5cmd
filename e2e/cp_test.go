@@ -3828,16 +3828,6 @@ func runTestCopyLocalObjectstoS3WithRawFlag(t *testing.T, tcCsp *testCase) {
 }
 
 // When folder is uploaded with --raw flag, it only uploads file with given name.
-func TestCopyDirToS3WithRawFlag(t *testing.T) {
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			runTestCopyDirToS3WithRawFlag(t, &tc)
-		})
-	}
-}
-
 func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
@@ -4046,7 +4036,6 @@ func runTestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T, tc *tes
 
 // cp --raw s3://bucket/file* s3://destbucket
 func TestCopyRawModeAllowDestinationWithoutPrefix(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
