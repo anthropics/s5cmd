@@ -3643,6 +3643,16 @@ func runTestCopyS3ToDirDryRun(t *testing.T, tc *testCase) {
 }
 
 func TestCopyLocalObjectstoS3WithRawFlag(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyLocalObjectstoS3WithRawFlag(t, &tc)
+		})
+	}
+}
+
+func runTestCopyLocalObjectstoS3WithRawFlag(t *testing.T, tcCsp *testCase) {
 	t.Parallel()
 
 	testcases := []struct {
@@ -3654,7 +3664,7 @@ func TestCopyLocalObjectstoS3WithRawFlag(t *testing.T) {
 		rawFlag          string
 	}{
 		{
-			name: "cp --raw file*.txt s3://bucket/",
+			name: "cp --raw file*.txt " + tcCsp.storage + "://bucket/",
 			src: []fs.PathOp{
 				fs.WithFile("file*.txt", "content"),
 				fs.WithFile("file*1.txt", "content"),
@@ -3667,7 +3677,7 @@ func TestCopyLocalObjectstoS3WithRawFlag(t *testing.T) {
 			rawFlag:          "--raw",
 		},
 		{
-			name: "cp  file*.txt s3://bucket/",
+			name: "cp  file*.txt " + tcCsp.storage + "://bucket/",
 			src: []fs.PathOp{
 				fs.WithFile("file*.txt", "content"),
 				fs.WithFile("file*1.txt", "content"),
@@ -3680,7 +3690,7 @@ func TestCopyLocalObjectstoS3WithRawFlag(t *testing.T) {
 			rawFlag:          "",
 		},
 		{
-			name: "cp  a*/file*.txt s3://bucket/",
+			name: "cp  a*/file*.txt " + tcCsp.storage + "://bucket/",
 			src: []fs.PathOp{
 				fs.WithDir(
 					"a*",
@@ -3703,7 +3713,6 @@ func TestCopyLocalObjectstoS3WithRawFlag(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -3717,7 +3726,7 @@ func TestCopyLocalObjectstoS3WithRawFlag(t *testing.T) {
 			defer workdir.Remove()
 
 			srcpath := filepath.ToSlash(workdir.Join(tc.wantedFile))
-			dst := fmt.Sprintf("s3://%v", bucket)
+			dst := fmt.Sprintf(tcCsp.storage+"://%v", bucket)
 
 			cmd := s5cmd("cp", srcpath, dst)
 			if tc.rawFlag != "" {
