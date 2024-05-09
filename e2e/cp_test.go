@@ -5151,44 +5151,51 @@ func TestCountingWriter(t *testing.T) {
 }
 
 // It should skip special files
+
 func TestUploadingSocketFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "S3", storage: "s3"},
+		{name: "GCS", storage: "gs"},
 	}
 
-	t.Parallel()
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runUploadingSocketFile(t, &tc)
+		})
+	}
+}
 
-	s3client, s5cmd := setup(t)
+func runUploadingSocketFile(t *testing.T, tc *testCase) {
+	_, s5cmd := setup(t)
+
 	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
 
-	workdir := fs.NewDir(t, t.Name())
-	defer workdir.Remove()
-
-	sockaddr := workdir.Join("/s5cmd.sock")
-	ln, err := net.Listen("unix", sockaddr)
+	dir, err := ioutil.TempDir("", "s5cmd-test")
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer os.RemoveAll(dir)
 
-	t.Cleanup(func() {
-		ln.Close()
-		os.Remove(sockaddr)
-	})
+	socketFile := filepath.Join(dir, "socket.sock")
 
-	cmd := s5cmd("cp", sockaddr, "s3://"+bucket+"/")
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
+	mkfifo := exec.Command("mkfifo", socketFile)
+	if err := mkfifo.Run(); err != nil {
+		t.Fatalf("unable to create fifo file: %v", err)
+	}
 
-	// assert error message
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: contains(`is not a regular file`),
-	})
+	cmd := s5cmd("cp", socketFile, tc.storage+"://"+bucket+"/")
+	result := icmd.RunCmd(cmd)
 
-	// assert logs are empty (no copy)
-	assertLines(t, result.Stdout(), nil)
-
-	// assert exit code
 	result.Assert(t, icmd.Expected{ExitCode: 1})
+
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(`ERROR "cp %v %v://%v/socket.sock": "%v" is a named pipe`, socketFile, tc.storage, bucket, socketFile),
+	})
 }
 
 // cp --include "*.py" s3://bucket/* .
