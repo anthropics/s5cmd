@@ -965,42 +965,74 @@ func TestCopySingleFileToS3WithArbitraryMetadata(t *testing.T) {
 }
 
 // cp s3://bucket2/obj2 s3://bucket1/obj1 --metadata key1=val1 --metadata key2=val2 ...
+
 func TestCopyS3ToS3WithArbitraryMetadata(t *testing.T) {
 	t.Parallel()
+	t.Run("CopyS3ToS3WithArbitraryMetadata", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				t.Parallel()
 
-	s3client, s5cmd := setup(t)
+				const (
+					filename = "testfile1.txt"
+					content  = "this is a test file"
+				)
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+				metadata := map[string]string{
+					"key1": "val1",
+					"key2": "val2",
+					"key3": "val3",
+				}
 
-	const (
-		filename = "index"
-		content  = "things"
-		foo      = "Key1=foo"
-		bar      = "Key2=bar"
-	)
+				bucket1 := s3BucketFromTestName(t)
+				bucket2 := s3BucketFromTestName(t) + "-copy"
 
-	// build assert map
-	srcmetadata := map[string]*string{
-		"Key1": aws.String("value1"),
-		"Key2": aws.String("value2"),
-	}
+				s3client, s5cmd := setup(t)
 
-	dstmetadata := map[string]*string{
-		"Key1": aws.String("foo"),
-		"Key2": aws.String("bar"),
-	}
+				createBucket(t, s3client, bucket1)
+				createBucket(t, s3client, bucket2)
 
-	srcpath := fmt.Sprintf("s3://%v/%v", bucket, filename)
-	dstpath := fmt.Sprintf("s3://%v/%v_cp", bucket, filename)
+				putFile(t, s3client, bucket2, filename, content)
 
-	putFile(t, s3client, bucket, filename, content, putArbitraryMetadata(srcmetadata))
-	cmd := s5cmd("cp", "--metadata", foo, "--metadata", bar, srcpath, dstpath)
-	result := icmd.RunCmd(cmd)
-	result.Assert(t, icmd.Success)
+				srcpath := fmt.Sprintf("%v://%v/%v", tc.storage, bucket2, filename)
+				dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket1)
 
-	// assert S3
-	assert.Assert(t, ensureS3Object(s3client, bucket, fmt.Sprintf("%s_cp", filename), content, ensureArbitraryMetadata(dstmetadata)))
+				var metaFlags []string
+				for name, value := range metadata {
+					metaFlags = append(metaFlags, "--metadata", name+"="+value)
+				}
+
+				cmd := s5cmd(append([]string{"cp", srcpath, dstpath}, metaFlags...)...)
+				result := icmd.RunCmd(cmd)
+
+				result.Assert(t, icmd.Success)
+
+				assertLines(t, result.Stdout(), map[int]compareFunc{
+					0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+				}, jsonCheck(true))
+
+				// assert src object
+				assert.Assert(t, ensureS3Object(s3client, bucket2, filename, content))
+
+				obj := getObject(t, s3client, bucket1, filename)
+
+				// assert copied object
+				assert.Assert(t, ensureS3Object(s3client, bucket1, filename, content))
+
+				// assert copied object metadata 
+				switch tc.storage {
+				case "s3":
+					for k, v := range metadata {
+						assert.Equal(t, obj.Metadata.Get(k), v)
+					}
+				case "gs":
+					assert.DeepEqual(t, obj.Metadata, metadata)
+				}
+			})
+		}
+	})
+}
 }
 
 func TestCopySingleFileToS3WithAdjacentSlashes(t *testing.T) {
