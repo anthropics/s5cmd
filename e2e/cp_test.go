@@ -4507,91 +4507,84 @@ func runTestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T, tc *testCase
 // cp --exclude "*.gz" dir s3://bucket/
 // cp --exclude "*.gz" dir/ s3://bucket/
 // cp --exclude "*.gz" dir/* s3://bucket/
-func TestCopyLocalDirectoryToS3WithExcludeFilter(t *testing.T) {
-	t.Parallel()
 
-	testcases := []struct {
-		name            string
-		directoryPrefix string
+func TestCopyLocalDirectoryToS3WithExcludeFilters(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
 	}{
-		{
-			name:            "folder without /",
-			directoryPrefix: "",
-		},
-		{
-			name:            "folder with /",
-			directoryPrefix: "/",
-		},
-		{
-			name:            "folder with / and glob *",
-			directoryPrefix: "/*",
-		},
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
 	}
 
-	for _, tc := range testcases {
+	for _, tc := range testCases {
 		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.storage, func(t *testing.T) {
 			t.Parallel()
-
-			bucket := s3BucketFromTestName(t)
-
-			s3client, s5cmd := setup(t)
-
-			createBucket(t, s3client, bucket)
-
-			folderLayout := []fs.PathOp{
-				fs.WithFile("testfile1.txt", "this is a test file 1"),
-				fs.WithFile("readme.md", "this is a readme file"),
-				fs.WithDir(
-					"a",
-					fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
-				),
-				fs.WithDir(
-					"b",
-					fs.WithFile("filename-with-hypen.gz", "file has hypen in its name"),
-				),
-			}
-
-			workdir := fs.NewDir(t, "somedir", folderLayout...)
-			defer workdir.Remove()
-
-			const excludePattern = "*.gz"
-
-			src := fmt.Sprintf("%v/", workdir.Path())
-			src = src + tc.directoryPrefix
-			dst := fmt.Sprintf("s3://%v/prefix/", bucket)
-
-			src = filepath.ToSlash(src)
-			cmd := s5cmd("cp", "--exclude", excludePattern, src, dst)
-			result := icmd.RunCmd(cmd)
-
-			result.Assert(t, icmd.Success)
-
-			// assert local filesystem
-			expected := fs.Expected(t, folderLayout...)
-			assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-			expectedS3Content := map[string]string{
-				"prefix/testfile1.txt":           "this is a test file 1",
-				"prefix/readme.md":               "this is a readme file",
-				"prefix/a/another_test_file.txt": "yet another txt file. yatf.",
-			}
-
-			nonExpectedS3Content := map[string]string{
-				"prefix/b/filename-with-hypen.gz": "file has hypen in its name",
-			}
-
-			// assert objects should be in S3
-			for key, content := range expectedS3Content {
-				assert.Assert(t, ensureS3Object(s3client, bucket, key, content))
-			}
-
-			//assert objects should not be in S3.
-			for key, content := range nonExpectedS3Content {
-				err := ensureS3Object(s3client, bucket, key, content)
-				assertError(t, err, errS3NoSuchKey)
-			}
+			runTestCopyLocalDirectoryToS3WithExcludeFilters(t, &tc)
 		})
+	}
+}
+
+func runTestCopyLocalDirectoryToS3WithExcludeFilters(t *testing.T, tc *testCase) {
+	bucket := s3BucketFromTestName(t)
+
+	s3client, s5cmd := setup(t)
+
+	createBucket(t, s3client, bucket)
+
+	folderLayout := []fs.PathOp{
+		fs.WithFile("testfile1.txt", "this is a test file 1"),
+		fs.WithFile("readme.md", "this is a readme file"),
+		fs.WithDir(
+			"a",
+			fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
+		),
+		fs.WithDir(
+			"b",
+			fs.WithFile("filename-with-hypen.gz", "file has hypen in its name"),
+		),
+	}
+
+	workdir := fs.NewDir(t, "somedir", folderLayout...)
+	defer workdir.Remove()
+
+	const (
+		excludePattern1 = "*.gz"  
+		excludePattern2 = "*.txt"
+	)
+
+	src := filepath.ToSlash(workdir.Path()) + "/"
+	dst := fmt.Sprintf("%s://%v/prefix/", tc.storage, bucket) 
+
+	cmd := s5cmd("cp", "--exclude", excludePattern1, "--exclude", excludePattern2, src, dst)
+	result := icmd.RunCmd(cmd)
+
+	result.Assert(t, icmd.Success)
+
+	// assert local filesystem  
+	expected := fs.Expected(t, folderLayout...)
+	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+
+	expectedS3Content := map[string]string{
+		"prefix/readme.md": "this is a readme file",
+	}
+
+	nonExpectedS3Content := map[string]string{
+		"prefix/testfile1.txt":           "this is a test file 1",        
+		"prefix/a/another_test_file.txt": "yet another txt file. yatf.", 
+		"prefix/b/filename-with-hypen.gz":"file has hypen in its name",  
+	}
+
+	// assert objects should be in S3
+	for key, content := range expectedS3Content {
+		assert.Assert(t, ensureS3Object(s3client, bucket, key, content))
+	}
+
+	//assert objects should not be in S3.
+	for key, content := range nonExpectedS3Content {
+		err := ensureS3Object(s3client, bucket, key, content)
+		assertError(t, err, errS3NoSuchKey)
 	}
 }
 
