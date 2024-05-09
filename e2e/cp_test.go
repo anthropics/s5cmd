@@ -51,7 +51,6 @@ var testCases = []testCase{
 }
 
 func TestCopySingleS3ObjectToLocal(t *testing.T) {
-	t.Parallel()
 	t.Run("SingleS3ObjectToLocal", func(t *testing.T) {
 		for _, tc := range testCases {
 			tc := tc
@@ -63,8 +62,6 @@ func TestCopySingleS3ObjectToLocal(t *testing.T) {
 }
 
 func runTestCopySingleS3ObjectToLocal(t *testing.T, tc *testCase) {
-	t.Parallel()
-
 	const (
 		fileContent = "this is a file content"
 	)
@@ -222,7 +219,6 @@ func TestCopySingleS3ObjectToLocalWithDestinationWildcard(t *testing.T) {
 func runTestCopySingleS3ObjectToLocalWithDestinationWildcard(t *testing.T, tc *testCase) {
 	t.Parallel()
 	t.Run(tc.storage, func(t *testing.T) {
-		t.Parallel()
 		s3client, s5cmd := setup(t)
 		bucket := s3BucketFromTestName(t)
 		createBucket(t, s3client, bucket)
@@ -411,7 +407,6 @@ func TestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t *testing.T)
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t, &tc)
 		})
 	}
@@ -464,7 +459,6 @@ func TestCopyMultipleFlatS3ObjectsToLocalJSON(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFlatS3ObjectsToLocalJSON(t, &tc)
 		})
 	}
@@ -523,7 +517,6 @@ func TestCopyMultipleNestedS3ObjectsToLocal(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleNestedS3ObjectsToLocal(t, &tc)
 		})
 	}
@@ -603,7 +596,6 @@ func TestCopyMultipleNestedS3ObjectsToLocalWithPartial(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleNestedS3ObjectsToLocalWithPartial(t, &tc)
 		})
 	}
@@ -671,7 +663,6 @@ func TestCopyMultipleS3ObjectsToGivenLocalDirectory(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleS3ObjectsToGivenLocalDirectory(t, &tc)
 		})
 	}
@@ -756,7 +747,6 @@ func TestCopySingleFileToS3(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleFileToS3(t, &tc)
 		})
 	}
@@ -820,7 +810,6 @@ func TestCopySingleFileToS3WithAllMetadataFlags(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleFileToS3WithAllMetadataFlags(t, &tc)
 		})
 	}
@@ -903,7 +892,6 @@ func TestCopySingleFileToS3WithArbitraryMetadata(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleFileToS3WithArbitraryMetadata(t, &tc)
 		})
 	}
@@ -955,7 +943,6 @@ func TestCopyS3ToS3WithArbitraryMetadata(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyS3ToS3WithArbitraryMetadata(t, &tc)
 		})
 	}
@@ -1012,7 +999,6 @@ func TestCopySingleFileToS3WithAdjacentSlashes(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleFileToS3WithAdjacentSlashes(t, &tc)
 		})
 	}
@@ -1063,7 +1049,6 @@ func TestCopySingleFileToS3JSON(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleFileToS3JSON(t, &tc)
 		})
 	}
@@ -1112,7 +1097,6 @@ func TestCopyDirToS3(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyDirToS3(t, &tc)
 		})
 	}
@@ -1177,7 +1161,6 @@ func TestCopyDirBackslashedToS3(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyDirBackslashedToS3(t, &tc)
 		})
 	}
@@ -1234,11 +1217,9 @@ func runTestCopyDirBackslashedToS3(t *testing.T, tc *testCase) {
 // cp --storage-class=GLACIER file s3://bucket/
 
 func TestCopySingleFileToS3WithStorageClassGlacier(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleFileToS3WithStorageClassGlacier(t, &tc)
 		})
 	}
@@ -1305,7 +1286,6 @@ func TestFlattenCopyDirToS3(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestFlattenCopyDirToS3(t, &tc)
 		})
 	}
@@ -1361,11 +1341,9 @@ func runTestFlattenCopyDirToS3(t *testing.T, tc *testCase) {
 // cp dir/* s3://bucket/
 
 func TestCopyMultipleFilesToS3Bucket(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFilesToS3Bucket(t, &tc)
 		})
 	}
@@ -1418,11 +1396,9 @@ func runTestCopyMultipleFilesToS3Bucket(t *testing.T, tc *testCase) {
 // cp parent/*/name.txt s3://bucket/newfolder
 
 func TestCopyMultipleFilesWithWildcardedDirectoryToS3Bucket(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFilesWithWildcardedDirectoryToS3Bucket(t, &tc)
 		})
 	}
@@ -1472,11 +1448,9 @@ func runTestCopyMultipleFilesWithWildcardedDirectoryToS3Bucket(t *testing.T, tc 
 // cp parent/c*/name.txt s3://bucket/newfolder
 
 func TestCopyMultipleFilesEndWildcardedToS3Bucket(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFilesEndWildcardedToS3Bucket(t, &tc)
 		})
 	}
@@ -1526,11 +1500,9 @@ func runTestCopyMultipleFilesEndWildcardedToS3Bucket(t *testing.T, tc *testCase)
 // cp parent/c*1/name.txt s3://bucket/newfolder
 
 func TestCopyMultipleFilesMiddleWildcardedDirectoryToS3Bucket(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFilesMiddleWildcardedDirectoryToS3Bucket(t, &tc)
 		})
 	}
@@ -1578,11 +1550,9 @@ func runTestCopyMultipleFilesMiddleWildcardedDirectoryToS3Bucket(t *testing.T, t
 // cp --flatten dir/* s3://bucket/
 
 func TestFlattenCopyMultipleFilesToS3Bucket(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestFlattenCopyMultipleFilesToS3Bucket(t, &tc)
 		})
 	}
@@ -1633,11 +1603,9 @@ func runTestFlattenCopyMultipleFilesToS3Bucket(t *testing.T, tc *testCase) {
 // cp dir/* s3://bucket/prefix (error)
 
 func TestCopyMultipleFilesToS3WithPrefixWithoutSlash(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFilesToS3WithPrefixWithoutSlash(t, &tc)
 		})
 	}
@@ -1733,11 +1701,9 @@ func runTestCopyDirectoryWithGlobCharactersToS3Bucket(t *testing.T, tc *testCase
 // cp dir/* s3://bucket/prefix/
 
 func TestCopyMultipleFilesToS3WithPrefixWithSlash(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFilesToS3WithPrefixWithSlash(t, &tc)
 		})
 	}
@@ -1783,11 +1749,9 @@ func runTestCopyMultipleFilesToS3WithPrefixWithSlash(t *testing.T, tc *testCase)
 // cp --flatten dir/* s3://bucket/prefix/
 
 func TestFlattenCopyMultipleFilesToS3WithPrefixWithSlash(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestFlattenCopyMultipleFilesToS3WithPrefixWithSlash(t, &tc)
 		})
 	}
@@ -1837,11 +1801,9 @@ func runTestFlattenCopyMultipleFilesToS3WithPrefixWithSlash(t *testing.T, tc *te
 // cp dir/ s3://bucket/prefix/
 
 func TestCopyLocalDirectoryToS3WithPrefixWithSlash(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyLocalDirectoryToS3WithPrefixWithSlash(t, &tc)
 		})
 	}
@@ -1889,11 +1851,9 @@ func runTestCopyLocalDirectoryToS3WithPrefixWithSlash(t *testing.T, tc *testCase
 // cp --flatten dir/ s3://bucket/prefix/
 
 func TestFlattenCopyLocalDirectoryToS3WithPrefixWithSlash(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestFlattenCopyLocalDirectoryToS3WithPrefixWithSlash(t, &tc)
 		})
 	}
@@ -1942,11 +1902,9 @@ func runTestFlattenCopyLocalDirectoryToS3WithPrefixWithSlash(t *testing.T, tc *t
 // cp dir/ s3://bucket/prefix
 
 func TestCopyLocalDirectoryToS3WithPrefixWithoutSlash(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyLocalDirectoryToS3WithPrefixWithoutSlash(t, &tc)
 		})
 	}
@@ -1994,11 +1952,9 @@ func runTestCopyLocalDirectoryToS3WithPrefixWithoutSlash(t *testing.T, tc *testC
 // cp s3://bucket/object s3://bucket/object2
 
 func TestCopySingleObjectToObject(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleObjectToObject(t, &tc)
 		})
 	}
@@ -2042,11 +1998,9 @@ func runTestCopySingleObjectToObject(t *testing.T, tc *testCase) {
 // --json cp s3://bucket/object s3://bucket2/object
 
 func TestCopySingleS3ObjectToS3JSON(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleS3ObjectToS3JSON(t, &tc)
 		})
 	}
@@ -2089,11 +2043,9 @@ func runTestCopySingleS3ObjectToS3JSON(t *testing.T, tc *testCase) {
 // cp s3://bucket/object s3://bucket2/
 
 func TestCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleS3ObjectIntoAnotherBucketWithPrefix(t, &tc)
 		})
 	}
@@ -2178,11 +2130,9 @@ func runCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T, tc *testCase
 // cp --flatten s3://bucket/object s3://bucket2/
 
 func TestFlattenCopySingleS3ObjectIntoAnotherBucket(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runFlattenCopySingleObjectIntoAnotherBucket(t, &tc)
 		})
 	}
@@ -2235,11 +2185,9 @@ func runFlattenCopySingleObjectIntoAnotherBucket(t *testing.T, tc *testCase) {
 // cp s3://bucket/object s3://bucket2/object
 
 func TestCopySingleS3ObjectIntoAnotherBucketWithObjName(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleS3ObjectIntoAnotherBucketWithObjName(t, &tc)
 		})
 	}
@@ -2288,11 +2236,9 @@ func runTestCopySingleS3ObjectIntoAnotherBucketWithObjName(t *testing.T, tc *tes
 // cp s3://bucket/* s3://dstbucket/
 
 func TestCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t, &tc)
 		})
 	}
@@ -2353,7 +2299,6 @@ func runCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T, t
 // cp s3://bucket/* s3://bucket/prefix/
 
 func TestCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2409,7 +2354,6 @@ func runTestCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T, tc *testCase) {
 // cp --flatten s3://bucket/* s3://bucket/prefix/
 
 func TestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2466,7 +2410,6 @@ func runTestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T, tc *testCas
 // cp s3://bucket/* s3://bucket/prefix
 
 func TestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2512,7 +2455,6 @@ func TestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T) {
 // --json cp s3://bucket/* s3://bucket/prefix/
 
 func TestCopyMultipleS3ObjectsToS3JSON(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2569,7 +2511,6 @@ func runTestCopyMultipleS3ObjectsToS3JSON(t *testing.T, tc *testCase) {
 // cp -u -s s3://bucket/prefix/* s3://bucket/prefix2/
 
 func TestCopyMultipleS3ObjectsToS3_Issue70(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2647,7 +2588,6 @@ func runCopyMultipleS3ObjectsToS3_Issue70(t *testing.T, tc *testCase) {
 // cp s3://bucket/object dir/ (dirobject exists)
 
 func TestCopyS3ObjectToLocalWithTheSameFilename(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2688,7 +2628,6 @@ func TestCopyS3ObjectToLocalWithTheSameFilename(t *testing.T) {
 // -log=debug cp -n s3://bucket/object .
 
 func TestCopyS3ToLocalWithSameFilenameWithNoClobber(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2733,7 +2672,6 @@ func runTestCopyS3ToLocalWithSameFilenameWithNoClobber(t *testing.T, tc *testCas
 // cp -n -s s3://bucket/object dir/
 
 func TestCopyS3ToLocalWithSameFilenameOverrideIfSizeDiffers(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2778,7 +2716,6 @@ func TestCopyS3ToLocalWithSameFilenameOverrideIfSourceIsNewer(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyS3ToLocalWithSameFilenameOverrideIfSourceIsNewer(t, &tc)
 		})
 	}
@@ -2829,7 +2766,6 @@ func TestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t *testing.T
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t, &tc)
 		})
 	}
@@ -2878,7 +2814,6 @@ func runTestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t *testin
 // cp -u -s s3://bucket/prefix/* dir/
 
 func TestCopyS3ToLocal_Issue70(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2927,7 +2862,6 @@ func runTestCopyS3ToLocal_Issue70(t *testing.T, tc *testCase) {
 // cp file s3://bucket (bucket/file exists)
 
 func TestCopyLocalFileToS3WithTheSameFilename(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -2969,7 +2903,6 @@ func runTestCopyLocalFileToS3WithTheSameFilename(t *testing.T, tc *testCase) {
 // -log=debug cp -n file s3://bucket (bucket/file exists)
 
 func TestCopyLocalFileToS3WithSameFilenameWithNoClobber(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3011,7 +2944,6 @@ func runTestCopyLocalFileToS3WithSameFilenameWithNoClobber(t *testing.T, tc *tes
 // cp -n file s3://bucket
 
 func TestCopyLocalFileToS3WithNoClobber(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3062,7 +2994,6 @@ func runTestCopyLocalFileToS3WithNoClobber(t *testing.T, tc *testCase) {
 // cp -n -s file s3://bucket (bucket/file exists)
 
 func TestCopyLocalFileToS3WithSameFilenameOverrideIfSizeDiffers(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3104,7 +3035,6 @@ func runTestCopyLocalFileToS3WithSameFilenameOverrideIfSizeDiffers(t *testing.T,
 // cp -n -u file s3://bucket (bucket/file exists, source is newer)
 
 func TestCopyLocalFileToS3WithSameFilenameOverrideIfSourceIsNewer(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3150,7 +3080,6 @@ func TestCopyLocalFileToS3WithSameFilenameDontOverrideIfS3ObjectIsOlder(t *testi
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyLocalFileToS3WithSameFilenameDontOverrideIfS3ObjectIsOlder(t, &tc)
 		})
 	}
@@ -3201,7 +3130,6 @@ func runTestCopyLocalFileToS3WithSameFilenameDontOverrideIfS3ObjectIsOlder(t *te
 // cp file s3://bucket/
 
 func TestCopyLocalFileToS3WithFilePermissions(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3242,7 +3170,6 @@ func runTestCopyLocalFileToS3WithFilePermissions(t *testing.T, tc *testCase) {
 // cp file s3://bucket/object
 
 func TestCopyLocalFileToS3WithCustomName(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3283,7 +3210,6 @@ func runTestCopyLocalFileToS3WithCustomName(t *testing.T, tc *testCase) {
 // cp file s3://bucket/prefix/
 
 func TestCopyLocalFileToS3WithPrefix(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3324,7 +3250,6 @@ func runTestCopyLocalFileToS3WithPrefix(t *testing.T, tc *testCase) {
 // cp file s3://bucket
 
 func TestMultipleLocalFileToS3Bucket(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3372,7 +3297,6 @@ func TestCopyMultipleLocalNestedFilesToS3(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleLocalNestedFilesToS3(t, &tc)
 		})
 	}
@@ -3446,7 +3370,6 @@ func runTestCopyMultipleLocalNestedFilesToS3(t *testing.T, tc *testCase) {
 // cp --no-follow-symlinks my_link s3://bucket/prefix/
 
 func TestCopyLinkToASingleFileWithFollowSymlinkDisabled(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3485,7 +3408,6 @@ func runTestCopyLinkToASingleFileWithFollowSymlinkDisabled(t *testing.T, tc *tes
 // cp * s3://bucket/prefix/
 
 func TestCopyWithFollowSymlink(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3550,7 +3472,6 @@ func runTestCopyErrorWhenGivenObjectIsNotFoundUsingWildcard(t *testing.T, tc *te
 // cp --no-follow-symlinks * s3://bucket/prefix/
 
 func TestCopyWithNoFollowSymlink(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3596,7 +3517,6 @@ func TestCopyDirToS3DryRun(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyDirToS3DryRun(t, &tc)
 		})
 	}
@@ -3648,7 +3568,6 @@ func runTestCopyDirToS3DryRun(t *testing.T, tc *testCase) {
 // --dry-run cp s3://bucket/* dir/
 
 func TestCopyS3ToDirDryRun(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3695,15 +3614,12 @@ func TestCopyLocalObjectstoS3WithRawFlag(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyLocalObjectstoS3WithRawFlag(t, &tc)
 		})
 	}
 }
 
 func runTestCopyLocalObjectstoS3WithRawFlag(t *testing.T, tcCsp *testCase) {
-	t.Parallel()
-
 	testcases := []struct {
 		name             string
 		src              []fs.PathOp
@@ -3809,14 +3725,12 @@ func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyS3ObjectstoLocalWithRawFlag(t, &tc)
 		})
 	}
 }
 
 func runTestCopyS3ObjectstoLocalWithRawFlag(t *testing.T, tcCsp *testCase) {
-	t.Parallel()
 	const fileContent = "this is a file content"
 	testcases := []struct {
 		name           string
@@ -3911,7 +3825,6 @@ func TestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			rawTestCopyMultipleS3ObjectsToS3WithRawMode(t, &tc)
 		})
 	}
@@ -3968,7 +3881,6 @@ func TestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t, &tc)
 		})
 	}
@@ -4016,7 +3928,6 @@ func TestCopyRawModeAllowDestinationWithoutPrefix(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyRawModeAllowDestinationWithoutPrefix(t, &tc)
 		})
 	}
@@ -4074,7 +3985,6 @@ func runTestCopyRawModeAllowDestinationWithoutPrefix(t *testing.T, tc *testCase)
 
 // cp --exclude "*.py" s3://bucket/* .
 func TestCopyS3ObjectsWithExcludeFilter(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
@@ -4133,7 +4043,6 @@ func TestCopyS3ObjectsWithExcludeFilter(t *testing.T) {
 // cp --exclude "*.py" --exclude "file*" s3://bucket/* .
 
 func TestCopyS3ObjectsWithExcludeFilters(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
@@ -4190,7 +4099,6 @@ func runTestCopyS3ObjectsWithExcludeFilters(t *testing.T, tc *testCase) {
 // cp --exclude ".txt" s3://bucket/abc* .
 
 func TestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
@@ -4434,7 +4342,6 @@ func runCopyExpectExitCode1OnUnreachableHost(t *testing.T, tc *testCase) {
 }
 
 func TestCopySingleFileToStorageWithNoSuchUploadRetryCount(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
@@ -4476,7 +4383,6 @@ func TestVersionedDownload(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestVersionedDownload(t, &tc)
 		})
 	}
@@ -4545,7 +4451,6 @@ func TestDeleteFileWhenDownloadFailed(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestDeleteFileWhenDownloadFailed(t, &tc)
 		})
 	}
@@ -4577,7 +4482,6 @@ func TestLocalFileOverridenWhenDownloadFailed(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestLocalFileOverridenWhenDownloadFailed(t, &tc)
 		})
 	}
@@ -4616,7 +4520,6 @@ func TestCountingWriter(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCountingWriter(t, &tc)
 		})
 	}
@@ -4681,7 +4584,6 @@ func runUploadingSocketFile(t *testing.T, tc *testCase) {
 // cp --include "*.py" s3://bucket/* .
 
 func TestCopyS3ObjectsWithIncludeFilter(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
