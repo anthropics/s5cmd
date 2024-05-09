@@ -469,7 +469,20 @@ func runTestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t *testing
 }
 
 // --json cp --flatten s3://bucket/* .
+
 func TestCopyMultipleFlatS3ObjectsToLocalJSON(t *testing.T) {
+	t.Parallel()
+	t.Run("CopyMultipleFlatS3ObjectsToLocalJSON", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				runTestCopyMultipleFlatS3ObjectsToLocalJSON(t, \&tc)
+			})
+		}
+	})
+}
+
+func runTestCopyMultipleFlatS3ObjectsToLocalJSON(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -479,70 +492,46 @@ func TestCopyMultipleFlatS3ObjectsToLocalJSON(t *testing.T) {
 
 	filesToContent := map[string]string{
 		"testfile1.txt":            "this is a test file 1",
-		"readme.md":                "this is a readme file",
-		"b/filename-with-hypen.gz": "file has hypen in its name",
-		"a/another_test_file.txt":  "yet another txt file. yatf.",
+		"a/readme.md":              "this is a readme file",
+		"a/filename-with-hypen.gz": "file has hypen in its name",
+		"b/another_test_file.txt":  "yet another txt file. yatf.",
 	}
 
 	for filename, content := range filesToContent {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	cmd := s5cmd("--json", "cp", "--flatten", "s3://"+bucket+"/*", ".")
+	cmd := s5cmd("--json", "cp", "--flatten", tc.storage+"://"+bucket+"/*", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
 		0: json(`
-			{
-				"operation": "cp",
-				"success": true,
-				"source": "s3://%v/a/another_test_file.txt",
-				"destination": "another_test_file.txt",
-				"object":{
-					"type": "file",
-					"size": 27
-				}
-			}
-		`, bucket),
+            {
+              "operation": "cp", "success": true, "source": "%v://%v/a/filename-with-hypen.gz",
+              "destination": "filename-with-hypen.gz", "object": { "type": "file", "size": 26 }
+            }
+        `, tc.storage, bucket, nil),
 		1: json(`
-			{
-				"operation": "cp",
-				"success": true,
-				"source": "s3://%v/b/filename-with-hypen.gz",
-				"destination": "filename-with-hypen.gz",
-				"object": {
-					"type": "file",
-					"size": 26
-				}
-			}
-		`, bucket),
+            {
+              "operation": "cp", "success": true, "source": "%v://%v/a/readme.md",
+              "destination": "readme.md", "object": { "type": "file", "size": 22 }
+            }
+        `, tc.storage, bucket, nil),
 		2: json(`
-			{
-				"operation": "cp",
-				"success": true,
-				"source": "s3://%v/readme.md",
-				"destination": "readme.md",
-				"object": {
-					"type": "file",
-					"size": 21
-				}
-			}
-		`, bucket),
+            {
+              "operation": "cp", "success": true, "source": "%v://%v/b/another_test_file.txt",
+              "destination": "another_test_file.txt", "object": { "type": "file", "size": 28 }
+            }
+        `, tc.storage, bucket, nil),
 		3: json(`
-			{
-				"operation": "cp",
-				"success": true,
-				"source": "s3://%v/testfile1.txt",
-				"destination": "testfile1.txt",
-				"object": {
-					"type": "file",
-					"size": 21
-				}
-			}
-		`, bucket),
-	}, sortInput(true), jsonCheck(true))
+            {
+              "operation": "cp", "success": true, "source": "%v://%v/testfile1.txt",
+              "destination": "testfile1.txt", "object": { "type": "file", "size": 21 }
+            }
+        `, tc.storage, bucket, nil),
+	}, jsonCheck(true), sortInput(true))
 
 	// assert local filesystem
 	// expect flattened directory structure
@@ -559,6 +548,7 @@ func TestCopyMultipleFlatS3ObjectsToLocalJSON(t *testing.T) {
 	for filename, content := range filesToContent {
 		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 	}
+}
 }
 
 // cp s3://bucket/* dir/ (nested source hierarchy)
