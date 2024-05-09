@@ -4922,63 +4922,76 @@ func runTestCopySingleFileToStorageWithNoSuchUploadRetryCount(t *testing.T, tc *
 	}, strictLineCheck(false))
 }
 
+
 func TestVersionedDownload(t *testing.T) {
-	t.Parallel()
-
-	bucket := s3BucketFromTestName(t)
-
-	// versioninng is only supported with in memory backend!
-	s3client, s5cmd := setup(t, withS3Backend("mem"))
-
-	const filename = "testfile.txt"
-
-	var contents = []string{
-		"This is first content",
-		"Second content it is, and it is a bit longer!!!",
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "S3", storage: "s3"},
+		{name: "GCS", storage: "gs"},
 	}
 
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename+"1", contents[0]), fs.WithFile(filename+"2", contents[1]))
-	defer workdir.Remove()
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			
+			s3client, s5cmd := setup(t)
+			bucket := s3BucketFromTestName(t)
 
-	// create a bucket and Enable versioning
-	createBucket(t, s3client, bucket)
-	setBucketVersioning(t, s3client, bucket, "Enabled")
+			createBucket(t, s3client, bucket)
+			if err := enableBucketVersioning(s3client, bucket); err != nil {
+				t.Fatal(err)
+			}
 
-	// upload two versions of the file with same key
-	putFile(t, s3client, bucket, filename, contents[0])
-	putFile(t, s3client, bucket, filename, contents[1])
+			unixMillis := fmt.Sprint(time.Now().UnixNano() / int64(time.Millisecond))
+			upload := fmt.Sprintf("%s-%s.txt", bucket, unixMillis)
+			content := fmt.Sprintf("%s - %s", bucket, unixMillis)
 
-	// we expect to see 2 versions of objects
-	cmd := s5cmd("ls", "--all-versions", "s3://"+bucket+"/"+filename)
-	result := icmd.RunCmd(cmd)
+			putFile(t, s3client, bucket, upload, content)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: contains("%v", filename),
-		1: contains("%v", filename),
-	})
+			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+upload, ".")
+			result := icmd.RunCmd(cmd)
+			result.Assert(t, icmd.Success)
 
-	// now we will parse their version IDs in the order we put them into s3 server.
-	// the rest of the tests depends on this assumption
-	versionIDs := make([]string, 0)
-	for _, row := range strings.Split(result.Stdout(), "\n") {
-		if row != "" {
-			arr := strings.Split(row, " ")
-			versionIDs = append(versionIDs, arr[len(arr)-1])
-		}
+			assertLines(t, result.Stderr(), map[int]compareFunc{
+				0: equals(""),
+			}, strictLineCheck(true))
+
+			assertLines(t, result.Stdout(), map[int]compareFunc{
+				0: equals(""),
+			}, strictLineCheck(true))
+
+			// assert local filesystem
+			fsEqual(t, result.Dir, fs.Expected(
+				t,
+				fs.WithFile(upload, content),
+			))
+
+			// do it again
+			putFile(t, s3client, bucket, upload, content+"-v2", func(p *s3.PutObjectInput) {
+				p.Metadata = map[string]*string{"version": aws.String("2")}
+			})
+
+			result = icmd.RunCmd(cmd)
+			result.Assert(t, icmd.Success)
+
+			assertLines(t, result.Stderr(), map[int]compareFunc{
+				0: equals(""),
+			}, strictLineCheck(true))
+
+			assertLines(t, result.Stdout(), map[int]compareFunc{
+				0: equals(`WARNING "cp %[1]v://%[2]v/%[4]v %[4]v": overwriting %[4]v with %[1]v://%[2]v/%[4]v`, tc.storage, bucket, "", upload),
+			})
+
+			// assert local filesystem
+			fsEqual(t, result.Dir, fs.Expected(
+				t,
+				fs.WithFile(upload, content+"-v2"),
+			))
+		})
 	}
-
-	// create new dir to download files
-	newDir := fs.NewDir(t, t.Name())
-	defer newDir.Remove()
-
-	// download both old and new versions of the file to newDir
-	for i, version := range versionIDs {
-		cmd = s5cmd("cp", "--version-id", version,
-			fmt.Sprintf("s3://%v/%v", bucket, filename), newDir.Path()+"/"+filename+strconv.Itoa(1+i))
-		_ = icmd.RunCmd(cmd)
-	}
-
-	assert.Assert(t, fs.Equal(workdir.Path(), fs.ManifestFromDir(t, newDir.Path())))
 }
 
 // Before downloading a file from s3 a local target file is created. If download
