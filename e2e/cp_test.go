@@ -3616,10 +3616,19 @@ func runTestCopyWithNoFollowSymlink(t *testing.T, tc *testCase) {
 
 // --dry-run cp dir/ s3://bucket/
 func TestCopyDirToS3DryRun(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyDirToS3DryRun(t, &tc)
+		})
+	}
+}
+
+func runTestCopyDirToS3DryRun(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
@@ -3635,7 +3644,7 @@ func TestCopyDirToS3DryRun(t *testing.T) {
 	defer workdir.Remove()
 
 	srcpath := filepath.ToSlash(workdir.Path())
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
+	dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
 	cmd := s5cmd("--dry-run", "cp", workdir.Path()+"/", dstpath)
 	result := icmd.RunCmd(cmd)
