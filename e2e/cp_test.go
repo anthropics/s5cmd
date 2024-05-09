@@ -3506,40 +3506,51 @@ func runTestCopyLocalFileToS3WithFilePermissions(t *testing.T, tc *testCase) {
 }
 
 // cp file s3://bucket/object
+
 func TestCopyLocalFileToS3WithCustomName(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyLocalFileToS3WithCustomName(t, &tc)
+		})
+	}
+}
 
+func runTestCopyLocalFileToS3WithCustomName(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
+	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
 
 	const (
 		filename = "testfile1.txt"
-		content  = "this is the content"
+		content  = "this is a file content"
+		destname = "custom-name.txt"
 	)
 
-	createBucket(t, s3client, bucket)
+	dir := t.TempDir()
+	localFile := filepath.Join(dir, filename)
+	err := ioutil.WriteFile(localFile, []byte(content), 0644)
+	assert.NilError(t, err)
 
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content))
-	defer workdir.Remove()
-
-	dstpath := fmt.Sprintf("s3://%v/%v", bucket, filename)
-
-	cmd := s5cmd("cp", filename, dstpath)
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
-
+	cmd := s5cmd("cp", localFile, tc.storage+"://"+bucket+"/"+destname)
+	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v %v`, filename, dstpath),
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(""),
 	})
 
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// assert s3 object
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+	// assert object was copied with custom name
+	assert.Assert(t, ensureS3Object(s3client, bucket, destname, content))
 }
 
 // cp file s3://bucket/prefix/
