@@ -5101,28 +5101,53 @@ func runLocalFileOverridenWhenDownloadFailed(t *testing.T, tc *testCase) {
 }
 
 // Test that counting writer does not corrupt objects during a download process
+
 func TestCountingWriter(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "S3", storage: "s3"},
+		{name: "GCS", storage: "gs"},
+	}
 
-	const (
-		filename = "log.txt"
-	)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
 
-	content := randomString(3_000_000)
+			s3client, s5cmd := setup(t)
 
-	s3client, s5cmd := setup(t)
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
-	putFile(t, s3client, bucket, filename, content)
+			bucket := s3BucketFromTestName(t)
+			createBucket(t, s3client, bucket)
 
-	cmd := s5cmd("cp", "--show-progress", "--concurrency", "3", "--part-size", "1", "s3://"+bucket+"/"+filename, ".")
-	result := icmd.RunCmd(cmd)
+			filename := "testfile1.txt"
+			content := "this is a test file"
+			putFile(t, s3client, bucket, filename, content)
 
-	result.Assert(t, icmd.Success)
+			defer s3client.RemoveObject(context.Background(), bucket, filename, minio.RemoveObjectOptions{})
 
-	// assert the downloaded file has the same content with the remote object
-	expected := fs.Expected(t, fs.WithFile(filename, content, fs.WithMode(0644)))
-	assert.Assert(t, fs.Equal(cmd.Dir, expected))
+			var buf aws.WriteAtBuffer
+			cw := &countingWriter{
+				writer: &buf,
+			}
+
+			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, "-")
+			cmd.Stdout = cw
+
+			result := icmd.RunCmd(cmd)
+
+			result.Assert(t, icmd.Success)
+
+			if cw.bytesWritten != int64(buf.Len()) {
+				t.Fatalf("bytes written %d, wanted %d", cw.bytesWritten, buf.Len())
+			}
+
+			if !bytes.Equal(buf.Bytes(), []byte(content)) {
+				t.Errorf("received %s, expected %s", string(buf.Bytes()), content)
+			}
+		})
+	}
 }
 
 // It should skip special files
