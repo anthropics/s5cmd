@@ -3908,6 +3908,16 @@ func TestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T) {
 
 // cp --raw s3://srcbucket/file* s3://dstbucket
 func TestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t, &tc)
+		})
+	}
+}
+
+func runTestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
@@ -3929,8 +3939,8 @@ func TestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T) {
 		putFile(t, s3client, srcbucket, filename, content)
 	}
 
-	src := fmt.Sprintf("s3://%v/file*", srcbucket)
-	dst := fmt.Sprintf("s3://%v", dstbucket)
+	src := fmt.Sprintf(tc.storage+"://%v/file*", srcbucket)
+	dst := fmt.Sprintf(tc.storage+"://%v", dstbucket)
 
 	cmd := s5cmd("cp", "--raw", src, dst)
 	result := icmd.RunCmd(cmd)
@@ -3945,7 +3955,6 @@ func TestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T) {
 }
 
 // cp --raw s3://bucket/file* s3://destbucket
-
 func TestCopyRawModeAllowDestinationWithoutPrefix(t *testing.T) {
 
 	for _, tc := range testCases {
