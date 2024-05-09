@@ -2845,37 +2845,51 @@ func runCopyMultipleS3ObjectsToS3_Issue70(t *testing.T, tc *testCase) {
 }
 
 // cp s3://bucket/object dir/ (dirobject exists)
+
 func TestCopyS3ObjectToLocalWithTheSameFilename(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			
+			s3client, s5cmd := setup(t)
+			bucket := s3BucketFromTestName(t)
+			createBucket(t, s3client, bucket)
 
-	s3client, s5cmd := setup(t)
+			const (
+				filename = "testfile1.txt"
+				content  = "this is a file content"
+			)
 
-	const (
-		filename        = "testfile1.txt"
-		content         = "this is the content"
-		expectedContent = content + "\n"
-	)
+			workdir := fs.NewDir(t, t.Name(), fs.WithDir(filename, fs.WithMode(0550)))
+			defer workdir.Remove()
 
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content))
-	defer workdir.Remove()
+			putFile(t, s3client, bucket, filename, content)
 
-	createBucket(t, s3client, bucket)
-	// upload a modified version of the file
-	putFile(t, s3client, bucket, filename, expectedContent)
+			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, filename+"/")
+			result := icmd.RunCmd(cmd, withWorkingDir(workdir))
+			result.Assert(t, icmd.Expected{ExitCode: 1})
 
-	cmd := s5cmd("cp", "s3://"+bucket+"/"+filename, ".")
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
+			assertLines(t, result.Stderr(), map[int]compareFunc{
+				0: equals(`cp command failed: stat s3://test-copy-s-3-object-to-local-with-the-same-filename/testfile1.txt/testfile1.txt: not a directory`),
+			})
 
-	result.Assert(t, icmd.Success)
+			// assert local filesystem
+			expected := fs.Expected(t, fs.WithDir(filename, fs.WithMode(0550)))
+			assert.Assert(t, fs.Equal(workdir.Path(), expected))
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp s3://%v/%v %v", bucket, filename, filename),
-	})
-
-	expected := fs.Expected(t, fs.WithFile(filename, expectedContent))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+			// assert s3 object
+			assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+		})
+	}
 }
 
 // -log=debug cp -n s3://bucket/object .
