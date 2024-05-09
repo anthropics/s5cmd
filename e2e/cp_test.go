@@ -1309,50 +1309,63 @@ func TestCopySingleFileToS3WithStorageClassGlacier(t *testing.T) {
 }
 
 // cp --flatten dir/ s3://bucket/
+
 func TestFlattenCopyDirToS3(t *testing.T) {
 	t.Parallel()
 
-	s3client, s5cmd := setup(t)
+	t.Run("FlattenCopyDirToS3", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				t.Parallel()
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+				const (
+					rootFile   = "file1.txt" 
+					rootContent = "this is a test file"
+					subFile     = "sub/file2.txt"
+					subContent  = "this is another test file"
+				)
 
-	folderLayout := []fs.PathOp{
-		fs.WithFile("file1.txt", "this is the first test file"),
-		fs.WithFile("readme.md", "this is a readme file"),
-		fs.WithDir(
-			"c",
-			fs.WithFile("file2.txt", "this is the second test file"),
-		),
-	}
+				bucket := s3BucketFromTestName(t)
 
-	workdir := fs.NewDir(t, t.Name(), folderLayout...)
-	defer workdir.Remove()
-	srcpath := workdir.Path()
-	srcpath = filepath.ToSlash(srcpath)
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
+				s3client, s5cmd := setup(t)
 
-	// this command ('s5cmd cp dir/ s3://bucket/') will run in 'walk' mode,
-	// which is different than 'glob' mode.
-	cmd := s5cmd("cp", "--flatten", workdir.Path()+"/", dstpath)
-	result := icmd.RunCmd(cmd)
+				createBucket(t, s3client, bucket)
 
-	result.Assert(t, icmd.Success)
+				folderLayout := []fs.PathOp{
+					fs.WithFile(rootFile, rootContent),
+					fs.WithDir("sub",
+						fs.WithFile("file2.txt", subContent),
+					),
+				}
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v/c/file2.txt %vfile2.txt`, srcpath, dstpath),
-		1: equals(`cp %v/file1.txt %vfile1.txt`, srcpath, dstpath),
-		2: equals(`cp %v/readme.md %vreadme.md`, srcpath, dstpath),
-	}, sortInput(true))
+				workdir := fs.NewDir(t, tc.storage, folderLayout...)
+				defer workdir.Remove()
 
-	// assert local filesystem
-	expected := fs.Expected(t, folderLayout...)
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+				srcpath := filepath.ToSlash(workdir.Path()) + "/"
+				dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
-	// assert s3
-	assert.Assert(t, ensureS3Object(s3client, bucket, "file1.txt", "this is the first test file"))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "readme.md", "this is a readme file"))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "file2.txt", "this is the second test file"))
+				cmd := s5cmd("cp", "--flatten", srcpath, dstpath)
+				result := icmd.RunCmd(cmd)
+
+				result.Assert(t, icmd.Success)
+
+				assertLines(t, result.Stdout(), map[int]compareFunc{
+					0: suffix(`cp %v %v%v`, filepath.ToSlash(workdir.Join(subFile)), dstpath, filepath.Base(subFile)),
+					1: suffix(`cp %v %v%v`, filepath.ToSlash(workdir.Join(rootFile)), dstpath, rootFile),
+				}, sortInput(true))
+
+				// assert s3 objects
+				assert.Assert(t, ensureS3Object(s3client, bucket, filepath.Base(subFile), subContent))
+				assert.Assert(t, ensureS3Object(s3client, bucket, rootFile, rootContent))
+
+				// assert local filesystem
+				expected := fs.Expected(t, folderLayout...)
+				assert.Assert(t, fs.Equal(workdir.Path(), expected))
+			})
+		}
+	})
+}
 }
 
 // cp dir/* s3://bucket/
