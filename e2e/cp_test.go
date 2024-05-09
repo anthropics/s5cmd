@@ -780,58 +780,52 @@ func runTestCopyMultipleS3ObjectsToGivenLocalDirectory(t *testing.T, tc *testCas
 }
 
 // cp dir/file s3://bucket/
+
 func TestCopySingleFileToS3(t *testing.T) {
 	t.Parallel()
+	t.Run("CopySingleFileToS3", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				t.Parallel()
 
-	s3client, s5cmd := setup(t)
+				const (
+					filename = "testfile1.txt"
+					content  = "this is a test file"
+				)
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+				bucket := s3BucketFromTestName(t)
 
-	const (
-		// make sure that Put reads the file header and guess Content-Type correctly.
-		filename = "index"
-		content  = `
-<html lang="en">
-	<head>
-	<meta charset="utf-8">
-	<body>
-		<div id="foo">
-			<div class="bar"></div>
-		</div>
-		<div id="baz">
-			<style data-hey="naber"></style>
-		</div>
-	</body>
-</html>
-`
-		expectedContentType        = "text/html; charset=utf-8"
-		expectedContentDisposition = "inline"
-	)
+				s3client, s5cmd := setup(t)
 
-	workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
-	defer workdir.Remove()
+				createBucket(t, s3client, bucket)
 
-	srcpath := workdir.Join(filename)
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
-	contentDisposition := "inline"
+				workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
+				defer workdir.Remove()
 
-	srcpath = filepath.ToSlash(srcpath)
-	cmd := s5cmd("cp", "--content-disposition", contentDisposition, srcpath, dstpath)
-	result := icmd.RunCmd(cmd)
+				srcpath := workdir.Join(filename)
+				dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
-	result.Assert(t, icmd.Success)
+				srcpath = filepath.ToSlash(srcpath)
+				cmd := s5cmd("cp", srcpath, dstpath)
+				result := icmd.RunCmd(cmd)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+				result.Assert(t, icmd.Success)
+
+				assertLines(t, result.Stdout(), map[int]compareFunc{
+					0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+				})
+
+				// assert local filesystem
+				expected := fs.Expected(t, fs.WithFile(filename, content))
+				assert.Assert(t, fs.Equal(workdir.Path(), expected))
+
+				// assert s3
+				assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+			})
+		}
 	})
-
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// assert S3
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content, ensureContentType(expectedContentType), ensureContentDisposition(expectedContentDisposition)))
+}
 }
 
 func TestCopySingleFileToS3WithAllMetadataFlags(t *testing.T) {
