@@ -31,6 +31,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -3757,47 +3758,66 @@ func runTestCopyLocalObjectstoS3WithRawFlag(t *testing.T, tcCsp *testCase) {
 }
 
 // When folder is uploaded with --raw flag, it only uploads file with given name.
-
 func TestCopyDirToS3WithRawFlag(t *testing.T) {
-
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			s3client, s5cmd := setup(t)
-			bucket := s3BucketFromTestName(t)
-			createBucket(t, s3client, bucket)
-
-			dir, err := os.MkdirTemp("", "")
-			assert.NilError(t, err)
-			defer os.RemoveAll(dir)
-
-			filename1 := filepath.Join(dir, "testfile1")
-			filename2 := filepath.Join(dir, "testfile2")
-
-			const content1 = "blabla content I"
-			createTempFile(t, filename1, []byte(content1))
-			uploadDirName := fs.NewUniqueName()
-
-			const content2 = "content II"
-			createTempFile(t, filename2, []byte(content2))
-
-			_, err = s5cmd("-raw", "cp", dir+"/", tc.storage+"://"+bucket+"/"+uploadDirName).Output()
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Try get folder, expect 404
-			_, err = s3client.GetObject(context.Background(), bucket, uploadDirName, minio.GetObjectOptions{})
-			assertError(t, err, minio.ErrorResponse{Code: "NoSuchKey"})
-
-			// Test individual files
-			info1 := getObject(t, s3client, bucket, uploadDirName+"/testfile1")
-			info2 := getObject(t, s3client, bucket, uploadDirName+"/testfile2")
-			assert.Equal(t, string(readFile(t, info1)), content1)
-			assert.Equal(t, string(readFile(t, info2)), content2)
-		})
+	if runtime.GOOS == "windows" {
+		t.Skip()
 	}
+
+	t.Parallel()
+
+	s3client, s5cmd := setup(t)
+
+	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
+
+	folderLayout := []fs.PathOp{
+		fs.WithDir(
+			"a*",
+			fs.WithFile("file*.txt", "content"),
+			fs.WithFile("file*1.txt", "content"),
+		),
+		fs.WithDir(
+			"a*b",
+			fs.WithFile("file*2.txt", "content"),
+			fs.WithFile("file*3.txt", "content"),
+		),
+
+		fs.WithFile("file*4.txt", "content"),
+	}
+
+	workdir := fs.NewDir(t, t.Name(), folderLayout...)
+	defer workdir.Remove()
+
+	srcpath := filepath.ToSlash(workdir.Join("a*"))
+	dstpath := fmt.Sprintf("s3://%v", bucket)
+
+	cmd := s5cmd("cp", "--raw", srcpath, dstpath)
+	result := icmd.RunCmd(cmd)
+
+	result.Assert(t, icmd.Success)
+
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals("cp %v/file*.txt %v/a*/file*.txt", srcpath, dstpath),
+		1: equals("cp %v/file*1.txt %v/a*/file*1.txt", srcpath, dstpath),
+	}, sortInput(true))
+
+	expectedObjs := []string{"a*/file*.txt", "a*/file*1.txt"}
+	for _, obj := range expectedObjs {
+		err := ensureS3Object(s3client, bucket, obj, "content")
+		if err != nil {
+			t.Fatalf("Object %s is not in S3\n", obj)
+		}
+	}
+
+	nonExpectedObjs := []string{"a*b/file*2.txt", "a*b/file*3.txt", "file*.txt", "file*1.txt", "file*2.txt", "file*3.txt", "file*4.txt"}
+	for _, obj := range nonExpectedObjs {
+		err := ensureS3Object(s3client, bucket, obj, "content")
+		assertError(t, err, errS3NoSuchKey)
+	}
+
+	// assert local filesystem
+	expected := fs.Expected(t, folderLayout...)
+	assert.Assert(t, fs.Equal(workdir.Path(), expected))
 }
 
 func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
