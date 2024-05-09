@@ -4526,18 +4526,26 @@ func runTestCopySingleFileToStorageWithNoSuchUploadRetryCount(t *testing.T, tc *
 }
 
 func TestVersionedDownload(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runVersionedDownload(t, &tc)
+		})
+	}
+}
+
+func runTestVersionedDownload(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	bucket := s3BucketFromTestName(t)
-
-	// versioninng is only supported with in memory backend!
+	// versioning is only supported with in memory backend!
 	s3client, s5cmd := setup(t, withS3Backend("mem"))
 
 	const filename = "testfile.txt"
-
 	var contents = []string{
 		"This is first content",
-		"Second content it is, and it is a bit longer!!!",
+		"Second content it is, and it is a bit longer",
 	}
 
 	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename+"1", contents[0]), fs.WithFile(filename+"2", contents[1]))
@@ -4552,7 +4560,7 @@ func TestVersionedDownload(t *testing.T) {
 	putFile(t, s3client, bucket, filename, contents[1])
 
 	// we expect to see 2 versions of objects
-	cmd := s5cmd("ls", "--all-versions", "s3://"+bucket+"/"+filename)
+	cmd := s5cmd("ls", "--all-versions", tc.storage+"://"+bucket+"/"+filename)
 	result := icmd.RunCmd(cmd)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
@@ -4577,7 +4585,7 @@ func TestVersionedDownload(t *testing.T) {
 	// download both old and new versions of the file to newDir
 	for i, version := range versionIDs {
 		cmd = s5cmd("cp", "--version-id", version,
-			fmt.Sprintf("s3://%v/%v", bucket, filename), newDir.Path()+"/"+filename+strconv.Itoa(1+i))
+			fmt.Sprintf(tc.storage+"://%v/%v", bucket, filename), newDir.Path()+"/"+filename+strconv.Itoa(1+i))
 		_ = icmd.RunCmd(cmd)
 	}
 
