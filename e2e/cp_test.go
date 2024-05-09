@@ -3615,47 +3615,48 @@ func runTestCopyWithNoFollowSymlink(t *testing.T, tc *testCase) {
 }
 
 // --dry-run cp dir/ s3://bucket/
-
 func TestCopyDirToS3DryRun(t *testing.T) {
+	t.Parallel()
 
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			runTestCopyDirToS3DryRun(t, &tc)
-		})
-	}
-}
+	s3client, s5cmd := setup(t)
 
-func runTestCopyDirToS3DryRun(t *testing.T, tc *testCase) {
-	_, s5cmd := setup(t)
+	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
 
-	const (
-		bucket         = "bucket"
-		filesAndDirCnt = 3
-	)
-
-	workdir := t.TempDir()
-
-	for i := 0; i < filesAndDirCnt; i++ {
-		f, err := ioutil.TempFile(workdir, "")
-		assert.NilError(t, err)
-		_ = f.Close()
-
-		err = os.Mkdir(filepath.Join(workdir, fmt.Sprintf("dir%d", i)), os.ModePerm)
-		assert.NilError(t, err)
+	folderLayout := []fs.PathOp{
+		fs.WithFile("file1.txt", "content"),
+		fs.WithDir(
+			"c",
+			fs.WithFile("file2.txt", "content"),
+		),
 	}
 
-	cmd := s5cmd("--dry-run", "cp", workdir+"/", tc.storage+"://"+bucket+"/prefix/")
+	workdir := fs.NewDir(t, t.Name(), folderLayout...)
+	defer workdir.Remove()
+
+	srcpath := filepath.ToSlash(workdir.Path())
+	dstpath := fmt.Sprintf("s3://%v/", bucket)
+
+	cmd := s5cmd("--dry-run", "cp", workdir.Path()+"/", dstpath)
 	result := icmd.RunCmd(cmd)
+
 	result.Assert(t, icmd.Success)
 
-	// we expect 3 files and 3 dirs as cp output
-	assert.Assert(t, len(result.Stdout()) == 2*filesAndDirCnt)
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals(`cp %v/c/file2.txt %vc/file2.txt`, srcpath, dstpath),
+		1: equals(`cp %v/file1.txt %vfile1.txt`, srcpath, dstpath),
+	}, sortInput(true))
 
-	// assert s3 bucket is empty (nothing should be copied)
-	objects := getS3FileCount(t, bucket)
-	assert.Equal(t, 0, objects)
+	// assert no change in s3
+	objs := []string{"c/file2.txt", "file1.txt"}
+	for _, obj := range objs {
+		err := ensureS3Object(s3client, bucket, obj, "content")
+		assertError(t, err, errS3NoSuchKey)
+	}
+
+	// assert local filesystem
+	expected := fs.Expected(t, folderLayout...)
+	assert.Assert(t, fs.Equal(workdir.Path(), expected))
 }
 
 // --dry-run cp s3://bucket/* dir/
