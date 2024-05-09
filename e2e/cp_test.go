@@ -257,44 +257,36 @@ func TestCopyPrefixToLocalMustReturnError(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
-
-			bucket := s3BucketFromTestName(t)
-
-			s3client, s5cmd := setup(t)
-			createBucket(t, s3client, bucket)
-
-			const filename = "testfile1.txt"
-			putFile(t, s3client, bucket, filename, "")
-
-			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/", ".")
-			result := icmd.RunCmd(cmd)
-
-			result.Assert(t, icmd.Expected{
-				ExitCode: 1,
-				Err:      "Please provide a destination which is not a directory or use the --recursive flag",
-			})
+			runTestCopyPrefixToLocalMustReturnError(t, &tc)
 		})
 	}
 }
 
 func runTestCopyPrefixToLocalMustReturnError(t *testing.T, tc *testCase) {
 	t.Run(tc.name, func(t *testing.T) {
-		t.Parallel()
-
-		bucket := s3BucketFromTestName(t)
-
 		s3client, s5cmd := setup(t)
+		bucket := s3BucketFromTestName(t)
 		createBucket(t, s3client, bucket)
+		const (
+			prefix     = "prefix/"
+			objectpath = prefix + "file1.txt"
+			content    = "file content"
+		)
+		putFile(t, s3client, bucket, objectpath, content)
 
-		cmd := s5cmd("cp", tc.storage+"://"+bucket+"/prefix/", "localpath/")
+		cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+prefix, ".")
 		result := icmd.RunCmd(cmd)
-
 		result.Assert(t, icmd.Expected{ExitCode: 1})
 
+		// ignore stdout. we expect error logs from stderr.
 		assertLines(t, result.Stderr(), map[int]compareFunc{
-			0: equals("ERROR " + tc.storage + " prefix /prefix/ can not be a directory destination"),
+			0: equals(`ERROR "cp %v://%v/%v .": source argument must contain wildcard character`, tc.storage, bucket, prefix),
 		})
+		// assert local filesystem
+		expected := fs.Expected(t)
+		assert.Assert(t, fs.Equal(cmd.Dir, expected))
+		// assert s3 object
+		assert.Assert(t, ensureS3Object(s3client, bucket, objectpath, content))
 	})
 }
 
