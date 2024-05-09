@@ -3823,34 +3823,36 @@ func runTestCopyWithFollowSymlink(t *testing.T, tc *testCase) {
 	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+filename, expectedContent))
 }
 
+
 func TestCopyErrorWhenGivenObjectIsNotFoundUsingWildcard(t *testing.T) {
-	t.Parallel()
-
-	s3client, s5cmd := setup(t)
-
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
-
-	folderLayout := []fs.PathOp{
-		// we intentionally did not create a/f1.txt to
-		// trigger given object not found error.
-		fs.WithDir("b"),
-		fs.WithSymlink("b/link1", "a/f1.txt"),
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
 	}
 
-	workdir := fs.NewDir(t, t.Name(), folderLayout...)
-	defer workdir.Remove()
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyErrorWhenGivenObjectIsNotFoundUsingWildcard(t, &tc)
+		})
+	}
+}
 
-	dst := fmt.Sprintf("s3://%v/prefix/", bucket)
+func runTestCopyErrorWhenGivenObjectIsNotFoundUsingWildcard(t *testing.T, tc *testCase) {
+	_, s5cmd := setup(t)
 
-	cmd := s5cmd("cp", "*", dst)
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
+	cmd := s5cmd("cp", tc.storage+"://bucket/*.txt", ".")
+	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Expected{ExitCode: 1})
 
 	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: equals(`ERROR "cp * %v": given object b/link1 not found`, dst),
-	}, sortInput(true))
+		0: equals(`ERROR "cp %v://bucket/*.txt ." object not found`, tc.storage),
+	}, inOrder(true))
 }
 
 // cp --no-follow-symlinks * s3://bucket/prefix/
