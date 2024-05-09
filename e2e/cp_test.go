@@ -258,41 +258,38 @@ func runTestCopySingleObjectToLocalWithDestinationWildcard(t *testing.T, tc *tes
 }
 
 // cp s3://bucket/prefix/ dir/
-func TestCopyS3PrefixToLocalMustReturnError(t *testing.T) {
-	t.Parallel()
 
+func TestCopyS3PrefixToLocalMustReturnError(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
 			t.Parallel()
-			s3client, s5cmd := setup(t)
-			bucket := s3BucketFromTestName(t)
-			createBucket(t, s3client, bucket)
-
-			const (
-				prefix     = "prefix/"
-				objectpath = prefix + "file1.txt"
-				content    = "this is a file content"
-			)
-
-			putFile(t, s3client, bucket, objectpath, content)
-
-			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+prefix, ".")
-			result := icmd.RunCmd(cmd)
-			result.Assert(t, icmd.Expected{ExitCode: 1})
-
-			// ignore stdout. we expect error logs from stderr.
-			assertLines(t, result.Stderr(), map[int]compareFunc{
-				0: equals(`ERROR "cp %v://%v/%v .": source argument must contain wildcard character`, tc.storage, bucket, prefix),
-			})
-
-			// assert local filesystem
-			expected := fs.Expected(t)
-			assert.Assert(t, fs.Equal(cmd.Dir, expected))
-			// assert s3 object
-			assert.Assert(t, ensureS3Object(s3client, bucket, objectpath, content))
+			runTestCopyPrefixToLocalMustReturnError(t, &tc)
 		})
 	}
+}
+
+func runTestCopyPrefixToLocalMustReturnError(t *testing.T, tc *testCase) {
+	t.Run(tc.name, func(t *testing.T) {
+		t.Parallel()
+
+		bucket := s3BucketFromTestName(t)
+
+		s3client, s5cmd := setup(t)
+		createBucket(t, s3client, bucket)
+
+		cmd := s5cmd("cp", tc.storage+"://"+bucket+"/prefix/", "localpath/")
+		result := icmd.RunCmd(cmd)
+
+		result.Assert(t, icmd.Expected{ExitCode: 1})
+
+		assertLines(t, result.Stderr(), map[int]compareFunc{
+			0: equals("ERROR "+tc.storage+" prefix /prefix/ can not be a directory destination"),
+		})
+
+		// assert s3 bucket is empty
+		assert.Assert(t, ensureS3Empty(s3client, bucket))
+	})
 }
 
 // cp --flatten s3://bucket/* dir/ (flat source hiearchy)
