@@ -3712,35 +3712,63 @@ func runTestCopyMultipleLocalNestedFilesToS3(t *testing.T, tc *testCase) {
 }
 
 // cp --no-follow-symlinks my_link s3://bucket/prefix/
+
 func TestCopyLinkToASingleFileWithFollowSymlinkDisabled(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyLinkToASingleFileWithFollowSymlinkDisabled(t, &tc)
+		})
+	}
+}
+
+func runTestCopyLinkToASingleFileWithFollowSymlinkDisabled(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	fileContent := "CAFEBABE"
-	folderLayout := []fs.PathOp{
-		fs.WithDir(
-			"a",
-			fs.WithFile("f1.txt", fileContent),
-		),
-		fs.WithDir("b"),
-		fs.WithSymlink("b/my_link", "a/f1.txt"),
-	}
+	const (
+		filename        = "file.txt"
+		linkToFile      = "my_link"
+		expectedContent = "this is a test file"
+	)
 
-	workdir := fs.NewDir(t, t.Name(), folderLayout...)
-	defer workdir.Remove()
+	workdir := t.TempDir()
 
-	dst := fmt.Sprintf("s3://%v/prefix/", bucket)
+	filePath := filepath.Join(workdir, filename)
+	err := ioutil.WriteFile(filePath, []byte(expectedContent), 0644)
+	assert.NilError(t, err)
 
-	cmd := s5cmd("cp", "--no-follow-symlinks", "b/my_link", dst)
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
+	linkPath := filepath.Join(workdir, linkToFile)
+	err = os.Symlink(filePath, linkPath)
+	assert.NilError(t, err)
 
+	cmd := s5cmd("--no-follow-symlinks", "cp", linkPath, tc.storage+"://"+bucket+"/prefix/")
+	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{})
+	// assert link object was uploaded
+	err = s3client.HeadObject(&s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String("prefix/" + linkToFile),
+	})
+	assert.Assert(t, err != nil)
+
+	// assert the original file was not uploaded
+	err = s3client.HeadObject(&s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String("prefix/" + filename),
+	})
+	assert.Assert(t, err != nil)
 }
 
 // cp * s3://bucket/prefix/
