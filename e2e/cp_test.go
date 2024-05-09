@@ -424,7 +424,18 @@ func runTestCopyMultipleFlatS3ObjectsToLocalWithPartialMatching(t *testing.T, tc
 }
 
 // cp s3://bucket/*/*.txt dir/
+
 func TestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t, &tc)
+		})
+	}
+}
+
+func runTestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -433,26 +444,30 @@ func TestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t *testing.T)
 	createBucket(t, s3client, bucket)
 
 	filesToContent := map[string]string{
-		"testfile1.txt":     "test file 1",
-		"a/readme.md":       "this is a readme file",
-		"a/b/testfile2.txt": "test file 2",
+		"testfile1.txt":            "this is a test file 1",
+		"a/readme.md":              "this is a readme file",
+		"a/filename-with-hypen.gz": "file has hypen in its name",
+		"b/another_test_file.txt":  "yet another txt file. yatf.",
 	}
 
 	for filename, content := range filesToContent {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	cmd := s5cmd("cp", "--flatten", "s3://"+bucket+"/*/*.txt", ".")
+	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/*/*.txt", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
+	assertLines(t, result.Stderr(), map[int]compareFunc{})
+
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/a/b/testfile2.txt testfile2.txt`, bucket),
-	}, sortInput(true))
+		0: equals("cp " + tc.storage + "://" + bucket + "/b/another_test_file.txt b/another_test_file.txt"),
+	})
 
 	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile("testfile2.txt", "test file 2", fs.WithMode(0644)))
+	expected := fs.Expected(t, fs.WithDir("b", fs.WithMode(0755),
+		fs.WithFile("another_test_file.txt", "yet another txt file. yatf.")))
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 
 	// assert s3 objects
