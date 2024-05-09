@@ -2760,44 +2760,88 @@ func runTestCopyMultipleS3ObjectsToS3JSON(t *testing.T, tc *testCase) {
 }
 
 // cp -u -s s3://bucket/prefix/* s3://bucket/prefix2/
-func TestCopyMultipleS3ObjectsToS3_Issue70(t *testing.T) {
-	t.Parallel()
 
+func TestCopyMultipleS3ObjectsToS3_Issue70(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCopyMultipleS3ObjectsToS3_Issue70(t, &tc)
+		})
+	}
+}
+
+func runCopyMultipleS3ObjectsToS3_Issue70(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
 
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
 	filesToContent := map[string]string{
-		"config/.local/folder1/file1.txt": "this is a test file 1",
-		"config/.local/folder2/file2.txt": "this is a test file 2",
+		"file1.txt": "this is a test file 1",
+		"file2.txt": "this is a test file 2",
+		"file3.txt": "this is a test file 3",
 	}
 
 	for filename, content := range filesToContent {
-		putFile(t, s3client, bucket, filename, content)
+		putFile(t, s3client, bucket, "obj/"+filename, content)
 	}
 
-	src := fmt.Sprintf("s3://%v/config/.local/*", bucket)
-	dst := fmt.Sprintf("s3://%v/.local/", bucket)
+	t.Run("copy without -s", func(t *testing.T) {
+		src := fmt.Sprintf("%s://%s/obj/*", tc.storage, bucket)
+		dst := fmt.Sprintf("%s://%s/dst/", tc.storage, bucket)
 
-	cmd := s5cmd("cp", "-u", "-s", src, dst)
-	result := icmd.RunCmd(cmd)
+		cmd := s5cmd("-u", "cp", src, dst)
+		result := icmd.RunCmd(cmd)
 
-	result.Assert(t, icmd.Success)
+		result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/config/.local/folder1/file1.txt %vfolder1/file1.txt`, bucket, dst),
-		1: equals(`cp s3://%v/config/.local/folder2/file2.txt %vfolder2/file2.txt`, bucket, dst),
-	}, sortInput(true))
+		assertLines(t, result.Stderr(), map[int]compareFunc{
+			0: equals(""),
+		})
 
-	// assert s3 source objects
-	for filename, content := range filesToContent {
-		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
-	}
+		// assert s3 source objects
+		for filename, content := range filesToContent {
+			assert.Assert(t, ensureS3Object(s3client, bucket, "obj/"+filename, content))
+		}
 
-	// assert s3 destination objects
-	assert.Assert(t, ensureS3Object(s3client, bucket, ".local/folder1/file1.txt", "this is a test file 1"))
-	assert.Assert(t, ensureS3Object(s3client, bucket, ".local/folder2/file2.txt", "this is a test file 2"))
+		// assert s3 destination objects
+		for filename, content := range filesToContent {
+			assert.Assert(t, ensureS3Object(s3client, bucket, "dst/"+filename, content))
+		}
+	})
+
+	t.Run("copy with -s", func(t *testing.T) {
+		src := fmt.Sprintf("%s://%s/obj/*", tc.storage, bucket)
+		dst := fmt.Sprintf("%s://%s/dst2/", tc.storage, bucket)
+
+		cmd := s5cmd("-u", "-s", "cp", src, dst)
+		result := icmd.RunCmd(cmd)
+
+		result.Assert(t, icmd.Success)
+
+		assertLines(t, result.Stderr(), map[int]compareFunc{
+			0: equals(""),
+		})
+
+		// assert s3 source objects
+		for filename, content := range filesToContent {
+			assert.Assert(t, ensureS3Object(s3client, bucket, "obj/"+filename, content))
+		}
+
+		// assert s3 destination objects
+		assert.Assert(t, ensureS3Object(s3client, bucket, "dst2/file1.txt", filesToContent["file1.txt"]))
+		assert.Assert(t, ensureS3Object(s3client, bucket, "dst2/file2.txt", filesToContent["file2.txt"]))
+		assert.Assert(t, ensureS3Object(s3client, bucket, "dst2/file3.txt", filesToContent["file3.txt"]))
+	})
 }
 
 // cp s3://bucket/object dir/ (dirobject exists)
