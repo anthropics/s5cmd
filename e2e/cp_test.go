@@ -1580,7 +1580,26 @@ func runTestCopyMultipleFilesEndWildcardedToS3Bucket(t *testing.T, tc *testCase)
 }
 
 // cp parent/c*1/name.txt s3://bucket/newfolder
+
 func TestCopyMultipleFilesMiddleWildcardedDirectoryToS3Bucket(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyMultipleFilesMiddleWildcardedDirectoryToS3Bucket(t, &tc)
+		})
+	}
+}
+
+func runTestCopyMultipleFilesMiddleWildcardedDirectoryToS3Bucket(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -1588,39 +1607,35 @@ func TestCopyMultipleFilesMiddleWildcardedDirectoryToS3Bucket(t *testing.T) {
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
+	const (
+		subfolder1 = "sub1"
+		subfolder2 = "sub2"
+		filename   = "file.txt"
+		content    = "this is a test file"
+	)
+
 	folderLayout := []fs.PathOp{
-		fs.WithDir("parent", fs.WithDir(
-			"child1",
-			fs.WithFile("name.txt", "A file in parent/child1/"),
-		)),
+		fs.WithDir(subfolder1,
+			fs.WithFile(filename, content),
+		),
+		fs.WithDir(subfolder2,
+			fs.WithFile(filename, content),
+		),
 	}
 
-	workdir := fs.NewDir(t, "somedir", folderLayout...)
-	dstpath := fmt.Sprintf("s3://%v/newfolder/", bucket)
-	srcpath := workdir.Path()
-	srcpath = filepath.ToSlash(srcpath)
+	workdir := fs.NewDir(t, t.Name(), folderLayout...)
 	defer workdir.Remove()
 
-	cmd := s5cmd("cp", srcpath+"/parent/c*1/name.txt", dstpath)
+	cmd := s5cmd("cp", filepath.Join(workdir.Path(), "sub*1", filename), fmt.Sprintf("%s://%s/", tc.storage, bucket))
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
-	rs := result.Stdout()
-	assertLines(t, rs, map[int]compareFunc{
-		0: equals(`cp %v/parent/child1/name.txt %vchild1/name.txt`, srcpath, dstpath),
-	}, sortInput(true))
 
-	// assert local filesystem
-	expected := fs.Expected(t, folderLayout...)
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-	expectedS3Content := map[string]string{
-		"newfolder/child1/name.txt": "A file in parent/child1/",
-	}
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals(`cp %s/%s/%s %s://%s/%s/%s`, subfolder1, filename, tc.storage, bucket, subfolder1, filename),
+	})
 
-	// assert s3
-	for filename, content := range expectedS3Content {
-		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
-	}
+	assert.Assert(t, ensureS3Object(s3client, bucket, filepath.Join(subfolder1, filename), content))
 }
 
 // cp --flatten dir/* s3://bucket/
