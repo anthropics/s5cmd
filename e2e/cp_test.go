@@ -1133,50 +1133,63 @@ func TestCopySingleFileToS3JSON(t *testing.T) {
 }
 
 // cp dir/ s3://bucket/
+
+// cp dir/ s3://bucket/
 func TestCopyDirToS3(t *testing.T) {
 	t.Parallel()
 
-	s3client, s5cmd := setup(t)
+	t.Run("CopyDirToS3", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				t.Parallel()
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+				const (
+					filename = "file1.txt"
+					content  = "this is a test file"
+				)
 
-	folderLayout := []fs.PathOp{
-		fs.WithFile("file1.txt", "this is the first test file"),
-		fs.WithFile("readme.md", "this is a readme file"),
-		fs.WithDir(
-			"c",
-			fs.WithFile("file2.txt", "this is the second test file"),
-		),
-	}
+				bucket := s3BucketFromTestName(t)
 
-	workdir := fs.NewDir(t, t.Name(), folderLayout...)
-	defer workdir.Remove()
-	srcpath := workdir.Path()
-	srcpath = filepath.ToSlash(srcpath)
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
+				s3client, s5cmd := setup(t)
 
-	// this command ('s5cmd cp dir/ s3://bucket/') will run in 'walk' mode,
-	// which is different than 'glob' mode.
-	cmd := s5cmd("cp", workdir.Path()+"/", dstpath)
-	result := icmd.RunCmd(cmd)
+				createBucket(t, s3client, bucket)
 
-	result.Assert(t, icmd.Success)
+				folderLayout := []fs.PathOp{
+					fs.WithFile(filename, content),
+					fs.WithDir(
+						"c",
+						fs.WithFile("file2.txt", content),
+					),
+				}
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v/c/file2.txt %vc/file2.txt`, srcpath, dstpath),
-		1: equals(`cp %v/file1.txt %vfile1.txt`, srcpath, dstpath),
-		2: equals(`cp %v/readme.md %vreadme.md`, srcpath, dstpath),
-	}, sortInput(true))
+				workdir := fs.NewDir(t, tc.storage, folderLayout...)
+				defer workdir.Remove()
 
-	// assert local filesystem
-	expected := fs.Expected(t, folderLayout...)
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+				srcpath := filepath.ToSlash(workdir.Path())
+				dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
-	// assert s3
-	assert.Assert(t, ensureS3Object(s3client, bucket, "file1.txt", "this is the first test file"))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "readme.md", "this is a readme file"))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "c/file2.txt", "this is the second test file"))
+				cmd := s5cmd("cp", workdir.Path()+"/", dstpath)
+				result := icmd.RunCmd(cmd)
+
+				result.Assert(t, icmd.Success)
+
+				assertLines(t, result.Stdout(), map[int]compareFunc{
+					0: suffix(`cp %v/c/file2.txt %vc/file2.txt`, srcpath, dstpath),
+					1: suffix(`cp %v/file1.txt %vfile1.txt`, srcpath, dstpath),
+				}, sortInput(true))
+
+				// assert s3 objects
+				assert.Assert(t, ensureS3Object(s3client, bucket, "c/file2.txt", content))
+				assert.Assert(t, ensureS3Object(s3client, bucket, "file1.txt", content))
+
+				// assert local filesystem
+				expected := fs.Expected(t, folderLayout...)
+				assert.Assert(t, fs.Equal(workdir.Path(), expected))
+			})
+		}
+	})
+}
 }
 
 // cp dir/{file, folderWithBackslash} s3://bucket
