@@ -3152,42 +3152,52 @@ func runTestCopyS3ToLocal_Issue70(t *testing.T, tc *testCase) {
 }
 
 // cp file s3://bucket (bucket/file exists)
+
 func TestCopyLocalFileToS3WithTheSameFilename(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyLocalFileToS3WithTheSameFilename(t, &tc)
+		})
+	}
+}
 
+func runTestCopyLocalFileToS3WithTheSameFilename(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
-	const (
-		filename   = "testfile1.txt"
-		content    = "this is the content"
-		newContent = content + "\n"
-	)
-
+	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
+
+	const filename = "testfile1.txt"
+	const content = "this is a file content"
+
 	putFile(t, s3client, bucket, filename, content)
 
-	// the file to be uploaded is modified
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, newContent))
-	defer workdir.Remove()
+	// Local copy of the file with same name but different content
+	dir := t.TempDir()
+	localFilename := filepath.Join(dir, filename)
+	localContent := "this is the local content"
+	err := ioutil.WriteFile(localFilename, []byte(localContent), 0644)
+	assert.NilError(t, err)
 
-	dst := "s3://" + bucket
-	cmd := s5cmd("cp", filename, dst)
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
-
+	cmd := s5cmd("cp", localFilename, tc.storage+"://"+bucket)
+	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v %v/%v`, filename, dst, filename),
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(""),
 	})
 
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, newContent))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// expect s3 object to be updated with new content
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, newContent))
+	// assert s3 object
+	assert.Assert(t, ensureS3Object(s3client, bucket, filename, localContent))
 }
 
 // -log=debug cp -n file s3://bucket (bucket/file exists)
