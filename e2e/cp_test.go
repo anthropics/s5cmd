@@ -4174,7 +4174,6 @@ func runTestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T, tc *testCase
 // cp --exclude "*.gz" dir/* s3://bucket/
 
 func TestCopyLocalDirectoryToS3WithExcludeFilters(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
@@ -4246,77 +4245,7 @@ func runTestCopyLocalDirectoryToS3WithExcludeFilters(t *testing.T, tc *testCase)
 	}
 }
 
-// cp --exclude "*.gz" --exclude "*.txt" dir/ s3://bucket/
-func TestCopyLocalDirectoryToS3WithExcludeFilters(t *testing.T) {
-	t.Parallel()
-
-	s3client, s5cmd := setup(t)
-
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
-
-	folderLayout := []fs.PathOp{
-		fs.WithFile("testfile1.txt", "this is a test file 1"),
-		fs.WithFile("readme.md", "this is a readme file"),
-		fs.WithDir(
-			"a",
-			fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
-		),
-		fs.WithDir(
-			"b",
-			fs.WithFile("filename-with-hypen.gz", "file has hypen in its name"),
-		),
-	}
-
-	workdir := fs.NewDir(t, "somedir", folderLayout...)
-	defer workdir.Remove()
-
-	const (
-		excludePattern1 = "*.gz"
-		excludePattern2 = "*.txt"
-	)
-
-	src := fmt.Sprintf("%v/", workdir.Path())
-	dst := fmt.Sprintf("s3://%v/prefix/", bucket)
-
-	src = filepath.ToSlash(src)
-	cmd := s5cmd("cp", "--exclude", excludePattern1, "--exclude", excludePattern2, src, dst)
-	result := icmd.RunCmd(cmd)
-
-	result.Assert(t, icmd.Success)
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %vreadme.md %vreadme.md`, src, dst),
-	})
-
-	// assert local filesystem
-	expected := fs.Expected(t, folderLayout...)
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	expectedS3Content := map[string]string{
-		"prefix/readme.md": "this is a readme file",
-	}
-
-	nonExpectedS3Content := map[string]string{
-		"prefix/b/filename-with-hypen.gz": "file has hypen in its name",
-		"prefix/a/another_test_file.txt":  "yet another txt file. yatf.",
-		"prefix/testfile1.txt":            "this is a test file 1",
-	}
-
-	// assert objects should be in S3
-	for key, content := range expectedS3Content {
-		assert.Assert(t, ensureS3Object(s3client, bucket, key, content))
-	}
-
-	//assert objects should not be in S3.
-	for key, content := range nonExpectedS3Content {
-		err := ensureS3Object(s3client, bucket, key, content)
-		assertError(t, err, errS3NoSuchKey)
-	}
-}
-
 // cp --exclude "main*" 's3://srcbucket/*' s3://dstbucket
-
 func TestCopySingleObjectsIntoAnotherBucketWithExcludeFilters(t *testing.T) {
 
 	for _, tc := range testCases {
