@@ -2224,11 +2224,30 @@ func runTestCopySingleS3ObjectToS3JSON(t *testing.T, tc *testCase) {
 }
 
 // cp s3://bucket/object s3://bucket2/
-func TestCopySingleS3ObjectIntoAnotherBucket(t *testing.T) {
+
+func TestCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCopySingleS3ObjectIntoAnotherBucketWithPrefix(t, &tc)
+		})
+	}
+}
+
+func runCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T, tc *testCase) {
 	t.Parallel()
 
-	srcbucket := s3BucketFromTestName(t)
-	dstbucket := s3BucketFromTestNameWithPrefix(t, "copy")
+	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
+	dstbucket := s3BucketFromTestNameWithPrefix(t, "dst")
 
 	s3client, s5cmd := setup(t)
 
@@ -2238,12 +2257,13 @@ func TestCopySingleS3ObjectIntoAnotherBucket(t *testing.T) {
 	const (
 		filename = "testfile1.txt"
 		content  = "this is a file content"
+		prefix   = "prefix/"
 	)
 
 	putFile(t, s3client, srcbucket, filename, content)
 
-	src := fmt.Sprintf("s3://%v/%v", srcbucket, filename)
-	dst := fmt.Sprintf("s3://%v/", dstbucket)
+	src := fmt.Sprintf("%s://%v/%v", tc.storage, srcbucket, filename)
+	dst := fmt.Sprintf("%s://%v/%v", tc.storage, dstbucket, prefix)
 
 	cmd := s5cmd("cp", src, dst)
 	result := icmd.RunCmd(cmd)
@@ -2258,7 +2278,7 @@ func TestCopySingleS3ObjectIntoAnotherBucket(t *testing.T) {
 	assert.Assert(t, ensureS3Object(s3client, srcbucket, filename, content))
 
 	// assert s3 destination object
-	assert.Assert(t, ensureS3Object(s3client, dstbucket, filename, content))
+	assert.Assert(t, ensureS3Object(s3client, dstbucket, prefix+filename, content))
 }
 
 // cp --flatten s3://bucket/object s3://bucket2/
