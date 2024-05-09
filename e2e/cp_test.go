@@ -1084,52 +1084,52 @@ func TestCopySingleFileToS3WithAdjacentSlashes(t *testing.T) {
 }
 
 // --json cp dir/file s3://bucket
+
 func TestCopySingleFileToS3JSON(t *testing.T) {
 	t.Parallel()
+	t.Run("CopySingleFileToS3JSON", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				t.Parallel()
 
-	s3client, s5cmd := setup(t)
+				const (
+					filename = "testfile1.txt"
+					content  = "this is a test file"
+				)
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+				bucket := s3BucketFromTestName(t)
 
-	const (
-		filename = "testfile1.txt"
-		content  = "this is a test file"
-	)
+				s3client, s5cmd := setup(t)
 
-	workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
-	defer workdir.Remove()
+				createBucket(t, s3client, bucket)
 
-	fpath := workdir.Join(filename)
+				workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
+				defer workdir.Remove()
 
-	cmd := s5cmd("--json", "cp", fpath, "s3://"+bucket+"/")
-	result := icmd.RunCmd(cmd)
+				srcpath := workdir.Join(filename)
+				dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
-	jsonText := `
-		{
-			"operation": "cp",
-			"success": true,
-			"source": "%v",
-			"destination": "s3://%v/testfile1.txt",
-			"object": {
-				"type": "file",
-				"size":19
-			}
+				srcpath = filepath.ToSlash(srcpath)
+				cmd := s5cmd("--json", "cp", srcpath, dstpath)
+				result := icmd.RunCmd(cmd)
+
+				result.Assert(t, icmd.Success)
+
+				assertLines(t, result.Stdout(), map[int]compareFunc{
+					0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+				}, jsonCheck(true))
+
+				// assert local filesystem
+				expected := fs.Expected(t, fs.WithFile(filename, content))
+				assert.Assert(t, fs.Equal(workdir.Path(), expected))
+
+				// assert s3
+				assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+			})
 		}
-	`
-
-	result.Assert(t, icmd.Success)
-	fpath = filepath.ToSlash(fpath)
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: json(jsonText, fpath, bucket),
-	}, jsonCheck(true))
-
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// assert S3
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+	})
+}
 }
 
 // cp dir/ s3://bucket/
