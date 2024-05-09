@@ -1255,46 +1255,57 @@ func TestCopyDirBackslashedToS3(t *testing.T) {
 }
 
 // cp --storage-class=GLACIER file s3://bucket/
+
 func TestCopySingleFileToS3WithStorageClassGlacier(t *testing.T) {
 	t.Parallel()
+	t.Run("CopySingleFileToS3WithStorageClassGlacier", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				t.Parallel()
 
-	// storage class GLACIER does not exist in GCS.
-	skipTestIfGCS(t, "storage class GLACIER does not exist in GCS.")
+				const (
+					filename = "testfile1.txt"
+					content  = "this is a test file"
+				)
 
-	s3client, s5cmd := setup(t)
+				bucket := s3BucketFromTestName(t)
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+				s3client, s5cmd := setup(t)
 
-	const (
-		// make sure that Put reads the file header, not the extension
-		filename             = "index.txt"
-		content              = "content"
-		expectedStorageClass = "GLACIER"
-	)
+				createBucket(t, s3client, bucket)
 
-	workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
-	defer workdir.Remove()
+				workdir := fs.NewDir(t, tc.storage, fs.WithFile(filename, content))
+				defer workdir.Remove()
 
-	srcpath := workdir.Join(filename)
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
+				srcpath := workdir.Join(filename)
+				dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
-	srcpath = filepath.ToSlash(srcpath)
-	cmd := s5cmd("cp", "--storage-class=GLACIER", srcpath, dstpath)
-	result := icmd.RunCmd(cmd)
+				cmd := s5cmd("cp", "--storage-class", "GLACIER", srcpath, dstpath)
+				result := icmd.RunCmd(cmd)
 
-	result.Assert(t, icmd.Success)
+				result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+				assertLines(t, result.Stdout(), map[int]compareFunc{
+					0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+				}, jsonCheck(true))
+
+				obj := getObject(t, s3client, bucket, filename)
+
+				// assert copied object storage class
+				if tc.storage == "s3" {
+					assert.Equal(t, string(obj.StorageClass), "GLACIER")
+				}
+
+				assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+
+				// assert local filesystem
+				expected := fs.Expected(t, fs.WithFile(filename, content))
+				assert.Assert(t, fs.Equal(workdir.Path(), expected))
+			})
+		}
 	})
-
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// assert S3
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content, ensureStorageClass(expectedStorageClass)))
+}
 }
 
 // cp --flatten dir/ s3://bucket/
