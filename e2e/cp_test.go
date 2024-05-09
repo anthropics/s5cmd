@@ -4496,55 +4496,32 @@ func runTestDeleteFileWhenDownloadFailed(t *testing.T, tc *testCase) {
 }
 
 // Target local file should be overriden only if download completed successfully
-
 func TestLocalFileOverridenWhenDownloadFailed(t *testing.T) {
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
-			runLocalFileOverridenWhenDownloadFailed(t, &tc)
-		})
-	}
-}
+	t.Parallel()
 
-func runLocalFileOverridenWhenDownloadFailed(t *testing.T, tc *testCase) {
-	_, s5cmd := setup(t)
-
+	s3client, s5cmd := setup(t)
 	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
 
 	const (
-		filename = "testfile.txt"
-		content  = "this is a test file"
+		filename        = "testfile1.txt"
+		content         = "preserved content"
+		expectedContent = "preserved content"
 	)
 
-	// create test file
-	err := ioutil.WriteFile(filename, []byte(content), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
+	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content))
+	defer workdir.Remove()
 
-	// Copy from non-existent bucket
-	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, filename)
-	result := icmd.RunCmd(cmd)
+	// It is going try downloading a nonexistent file from the s3 so it will fail.
+	// In this case we don't expect to have a local file will be overwritten.
+	cmd := s5cmd("cp", "s3://"+bucket+"/"+filename, filename)
+	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
 
-	result.Assert(t, icmd.Expected{
-		ExitCode: 1,
-	})
+	result.Assert(t, icmd.Expected{ExitCode: 1})
 
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: contains(`ERROR "cp %v://%v/testfile.txt testfile.txt": Get "%v://%v/testfile.txt": %v`,
-			tc.storage, bucket, tc.storage, bucket, errS3NoSuchBucket),
-	}, strictLineCheck(false))
-
-	// expect the local file to have the original content
-	actual, err := ioutil.ReadFile(filename)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !bytes.Equal(actual, []byte(content)) {
-		t.Fatalf("file expected: %v, got %v", content, string(actual))
-	}
+	// assert initial file is untouched
+	expected := fs.Expected(t, fs.WithFile(filename, content))
+	assert.Assert(t, fs.Equal(workdir.Path(), expected))
 }
 
 // Test that counting writer does not corrupt objects during a download process
