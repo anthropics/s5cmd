@@ -5249,9 +5249,26 @@ func runCopyS3ObjectsWithIncludeFilter(t *testing.T, tc *testCase) {
 }
 
 // cp --include "file*" --exclude "*.py" s3://bucket/* .
-func TestCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T) {
-	t.Parallel()
 
+func TestCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "S3", storage: "s3"},
+		{name: "GCS", storage: "gs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runCopyS3ObjectsWithIncludeExcludeFilter(t, &tc)
+		})
+	}
+}
+
+func runCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
 
 	bucket := s3BucketFromTestName(t)
@@ -5265,7 +5282,7 @@ func TestCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T) {
 
 	files := [...]string{
 		"file1.py",
-		"file2.py",
+		"file2.py", 
 		"test.py",
 		"app.py",
 		"docs/readme.md",
@@ -5275,7 +5292,7 @@ func TestCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T) {
 		putFile(t, s3client, bucket, filename, fileContent)
 	}
 
-	srcpath := fmt.Sprintf("s3://%s", bucket)
+	srcpath := fmt.Sprintf("%s://%s", tc.storage, bucket)
 
 	cmd := s5cmd("cp", "--include", includePattern, "--exclude", excludePattern, srcpath+"/*", ".")
 	result := icmd.RunCmd(cmd)
