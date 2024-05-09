@@ -210,48 +210,39 @@ func runTestCopySingleObjectToLocalJSON(t *testing.T, tc *testCase) {
 }
 
 // cp s3://bucket/object *
+func TestCopySingleS3ObjectToLocalWithDestinationWildcard(t *testing.T) {
+	t.Parallel()
 
-func TestCopySingleObjectToLocalWithDestinationWildcard(t *testing.T) {
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
 			t.Parallel()
-			runTestCopySingleObjectToLocalWithDestinationWildcard(t, &tc)
+			s3client, s5cmd := setup(t)
+			bucket := s3BucketFromTestName(t)
+			createBucket(t, s3client, bucket)
+
+			const (
+				filename = "testfile1.txt"
+				content  = "this is a file content"
+			)
+
+			putFile(t, s3client, bucket, filename, content)
+
+			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, "*")
+			result := icmd.RunCmd(cmd)
+			result.Assert(t, icmd.Expected{ExitCode: 1})
+
+			// ignore stdout. we expect error logs from stderr.
+			assertLines(t, result.Stderr(), map[int]compareFunc{
+				0: equals(`ERROR "cp %v://%v/%v *": target "*" can not contain glob characters`, tc.storage, bucket, filename),
+			})
+
+			// assert local filesystem
+			expected := fs.Expected(t)
+			assert.Assert(t, fs.Equal(cmd.Dir, expected))
+			// assert s3 object
+			assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 		})
 	}
-}
-
-// cp s3://bucket/object * (or cp gs://bucket/object *)
-func runTestCopySingleObjectToLocalWithDestinationWildcard(t *testing.T, tc *testCase) {
-	bucket := s3BucketFromTestName(t)
-
-	s3client, s5cmd := setup(t)
-	createBucket(t, s3client, bucket)
-
-	const (
-		filename = "testfile1.txt"
-		content  = "this is a file content"
-	)
-	putFile(t, s3client, bucket, filename, content)
-
-	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, "*")
-	result := icmd.RunCmd(cmd)
-	result.Assert(t, icmd.Success)
-
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: equals(""),
-	})
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp " + tc.storage + "://" + bucket + "/" + filename + " " + filename + ""),
-	})
-
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content, fs.WithMode(0644)))
-	assert.Assert(t, fs.Equal(cmd.Dir, expected))
-
-	// assert s3 object
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 }
 
 // cp s3://bucket/prefix/ dir/
