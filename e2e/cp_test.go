@@ -769,7 +769,18 @@ func runTestCopyMultipleS3ObjectsToGivenLocalDirectory(t *testing.T, tc *testCas
 }
 
 // cp dir/file s3://bucket/
+
 func TestCopySingleFileToS3(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestCopySingleFileToS3(t, &tc)
+		})
+	}
+}
+
+func runTestCopySingleFileToS3(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -802,7 +813,7 @@ func TestCopySingleFileToS3(t *testing.T) {
 	defer workdir.Remove()
 
 	srcpath := workdir.Join(filename)
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
+	dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 	contentDisposition := "inline"
 
 	srcpath = filepath.ToSlash(srcpath)
@@ -819,7 +830,7 @@ func TestCopySingleFileToS3(t *testing.T) {
 	expected := fs.Expected(t, fs.WithFile(filename, content))
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
 
-	// assert S3
+	// assert S3/GCS
 	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content, ensureContentType(expectedContentType), ensureContentDisposition(expectedContentDisposition)))
 }
 
