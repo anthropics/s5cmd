@@ -828,73 +828,71 @@ func TestCopySingleFileToS3(t *testing.T) {
 }
 }
 
+
 func TestCopySingleFileToS3WithAllMetadataFlags(t *testing.T) {
 	t.Parallel()
+	t.Run("CopySingleFileToS3WithAllMetadataFlags", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				t.Parallel()
 
-	s3client, s5cmd := setup(t)
+				const (
+					filename        = "testfile1.txt"
+					content         = "this is a test file"
+					contentType     = "text/plain"
+					contentEncoding = "gzip"
+					cacheControl    = "no-cache"
+				)
 
-	bucket := s3BucketFromTestName(t)
+				metadata := map[string]string{
+					"content-type":     contentType,
+					"content-encoding": contentEncoding,
+					"cache-control":    cacheControl,
+				}
 
-	createBucket(t, s3client, bucket)
+				bucket := s3BucketFromTestName(t)
 
-	const (
-		filename           = "index"
-		content            = `testfilecontent`
-		cacheControl       = "public, max-age=3600"
-		expires            = "2025-01-01T00:00:00Z"
-		storageClass       = "STANDARD_IA"
-		ContentType        = "text/html; charset=utf-8"
-		ContentDisposition = "inline"
-		ContentEncoding    = "utf-8"
-		EncryptionMethod   = "aws:kms"
-		EncryptionKeyID    = "1234abcd-12ab-34cd-56ef-1234567890ab"
-	)
+				s3client, s5cmd := setup(t)
 
-	// expected expires flag is the parsed version of the date in RFC3339 format
-	parsedTime, err := time.Parse(time.RFC3339, expires)
-	if err != nil {
-		t.Fatal(err)
-	}
+				createBucket(t, s3client, bucket)
 
-	expectedExpires := parsedTime.Format(http.TimeFormat)
+				workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
+				defer workdir.Remove()
 
-	workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
-	defer workdir.Remove()
+				srcpath := workdir.Join(filename)
+				dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
-	srcpath := workdir.Join(filename)
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
+				srcpath = filepath.ToSlash(srcpath)
 
-	srcpath = filepath.ToSlash(srcpath)
-	cmd := s5cmd("cp",
-		"--cache-control", cacheControl,
-		"--expires", expires,
-		"--storage-class", storageClass,
-		"--content-type", ContentType,
-		"--content-disposition", ContentDisposition,
-		"--content-encoding", ContentEncoding,
-		"--sse", EncryptionMethod,
-		"--sse-kms-key-id", EncryptionKeyID,
-		srcpath, dstpath,
-	)
+				var metaFlags []string
+				for name, value := range metadata {
+					metaFlags = append(metaFlags, "--"+name, value)
+				}
 
-	result := icmd.RunCmd(cmd)
+				cmd := s5cmd(append([]string{"cp", srcpath, dstpath}, metaFlags...)...)
+				result := icmd.RunCmd(cmd)
 
-	result.Assert(t, icmd.Success)
+				result.Assert(t, icmd.Success)
 
-	expected := fs.Expected(t, fs.WithFile(filename, content))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+				assertLines(t, result.Stdout(), map[int]compareFunc{
+					0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+				}, jsonCheck(true))
 
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content,
-		ensureExpires(expectedExpires),
-		ensureCacheControl(cacheControl),
-		ensureStorageClass(storageClass),
-		ensureContentType(ContentType),
-		ensureContentDisposition(ContentDisposition),
-		ensureContentEncoding(ContentEncoding),
-		ensureEncryptionMethod(EncryptionMethod),
-		ensureEncryptionKeyID(EncryptionKeyID),
-	))
+				// assert local filesystem
+				expected := fs.Expected(t, fs.WithFile(filename, content))
+				assert.Assert(t, fs.Equal(workdir.Path(), expected))
 
+				obj := getS3Object(t, s3client, bucket, filename)
+
+				// assert s3 object metadata
+				assert.Equal(t, obj.ContentType, contentType)
+				assert.Equal(t, obj.ContentEncoding, contentEncoding)
+				assert.Equal(t, obj.CacheControl, cacheControl)
+			})
+		}
+	})
+}
 }
 
 // cp dir/file s3://bucket/ --metadata key1=val1 --metadata key2=val2 ...
