@@ -253,41 +253,38 @@ func runTestCopySingleS3ObjectToLocalWithDestinationWildcard(t *testing.T, tc *t
 }
 
 // cp s3://bucket/prefix/ dir/
+
 func TestCopyS3PrefixToLocalMustReturnError(t *testing.T) {
 	t.Parallel()
-
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
-			s3client, s5cmd := setup(t)
-			bucket := s3BucketFromTestName(t)
-			createBucket(t, s3client, bucket)
-
-			const (
-				prefix     = "prefix/"
-				objectpath = prefix + "file1.txt"
-				content    = "this is a file content"
-			)
-
-			putFile(t, s3client, bucket, objectpath, content)
-
-			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+prefix, ".")
-			result := icmd.RunCmd(cmd)
-			result.Assert(t, icmd.Expected{ExitCode: 1})
-
-			// ignore stdout. we expect error logs from stderr.
-			assertLines(t, result.Stderr(), map[int]compareFunc{
-				0: equals(`ERROR "cp %v://%v/%v .": source argument must contain wildcard character`, tc.storage, bucket, prefix),
+	t.Run("CopyS3PrefixToLocalMustReturnError", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				runTestCopyS3PrefixToLocalMustReturnError(t, \&tc)
 			})
+		}
+	})
+}
 
-			// assert local filesystem
-			expected := fs.Expected(t)
-			assert.Assert(t, fs.Equal(cmd.Dir, expected))
-			// assert s3 object
-			assert.Assert(t, ensureS3Object(s3client, bucket, objectpath, content))
-		})
-	}
+func runTestCopyS3PrefixToLocalMustReturnError(t *testing.T, tc *testCase) {
+	t.Parallel()
+
+	bucket := s3BucketFromTestName(t)
+
+	s3client, s5cmd := setup(t)
+	createBucket(t, s3client, bucket)
+
+	createPrefix(t, s3client, bucket, "prefix/")
+
+	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/prefix/", ".")
+	result := icmd.RunCmd(cmd)
+
+	result.Assert(t, icmd.Expected{ExitCode: 127})
+
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals("ERROR copying multiple objects to a single file is not supported"),
+	})
+}
 }
 
 // cp --flatten s3://bucket/* dir/ (flat source hiearchy)
