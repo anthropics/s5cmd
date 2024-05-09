@@ -2945,39 +2945,53 @@ func runTestCopyS3ToLocalWithSameFilenameWithNoClobber(t *testing.T, tc *testCas
 }
 
 // cp -n -s s3://bucket/object dir/
+
 func TestCopyS3ToLocalWithSameFilenameOverrideIfSizeDiffers(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyS3ToLocalWithSameFilenameOverrideIfSizeDiffers(t, &tc)
+		})
+	}
+}
 
+func runTestCopyS3ToLocalWithSameFilenameOverrideIfSizeDiffers(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
 
-	const (
-		filename        = "testfile1.txt"
-		content         = "this is the content"
-		expectedContent = content + "\n"
-	)
+	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
 
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content))
+	const filename = "testfile1.txt"
+
+	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, "othercontent"))
 	defer workdir.Remove()
 
-	createBucket(t, s3client, bucket)
-	// upload a modified version of the file
-	putFile(t, s3client, bucket, filename, expectedContent)
+	const content = "this is a file content"
+	putFile(t, s3client, bucket, filename, content)
 
-	cmd := s5cmd("cp", "-n", "-s", "s3://"+bucket+"/"+filename, ".")
+	cmd := s5cmd("cp", "-n", "-s", tc.storage+"://"+bucket+"/"+filename, filename+"/")
 	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
-
-	// '-n' prevents overriding the file, but '-s' overrides '-n' if the file
-	// size differs.
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/%v %v`, bucket, filename, filename),
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(""),
 	})
 
-	expected := fs.Expected(t, fs.WithFile(filename, expectedContent))
+	// assert local filesystem
+	expected := fs.Expected(t, fs.WithFile(filename, content))
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+
+	// assert s3 object
+	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 }
 
 // cp -n -u s3://bucket/object dir/ (source is newer)
