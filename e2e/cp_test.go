@@ -2832,45 +2832,47 @@ func runTestCopyS3ToLocalWithSameFilenameOverrideIfSourceIsNewer(t *testing.T, t
 }
 
 // cp -n -u s3://bucket/object dir/ (source is older)
-
 func TestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t *testing.T) {
+	t.Parallel()
 
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+	bucket := s3BucketFromTestName(t)
 
-			s3client, s5cmd := setup(t)
-			bucket := s3BucketFromTestName(t)
-			createBucket(t, s3client, bucket)
+	s3client, s5cmd := setup(t)
 
-			const objectName = "testfile1.txt"
+	const (
+		filename = "testfile1.txt"
+		content  = "this is the content"
+	)
 
-			// create s3 object and set mtime to 5 seconds ago
-			putFile(t, s3client, bucket, objectName, "oldcontent", mtime(time.Now().Add(-5*time.Second)))
+	createBucket(t, s3client, bucket)
+	// upload a modified version of the file.
+	putFile(t, s3client, bucket, filename, content+"\n")
 
-			// create newer local file with different content
-			const content = "this is newer local content"
-			workdir := fs.NewDir(t, t.Name(), fs.WithFile(objectName, content))
-			defer workdir.Remove()
+	// file on the fs is newer than the file on s3. expect an 'dont override'
+	// behaviour.
+	now := time.Now().UTC()
+	timestamp := fs.WithTimestamps(
+		now.Add(time.Minute), // access time
+		now.Add(time.Minute), // mod time
+	)
+	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content, timestamp))
+	defer workdir.Remove()
 
-			// copy from s3 to local with -n and -u
-			cmd := s5cmd("cp", "-n", "-u", tc.storage+"://"+bucket+"/"+objectName, objectName+"/")
-			result := icmd.RunCmd(cmd, withWorkingDir(workdir))
-			result.Assert(t, icmd.Success)
+	cmd := s5cmd("--log=debug", "cp", "-n", "-u", "s3://"+bucket+"/"+filename, ".")
+	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
 
-			assertLines(t, result.Stderr(), map[int]compareFunc{
-				0: equals(""),
-			})
+	// '-n' prevents overriding the file, but '-s' overrides '-n' if the file
+	// size differs.
+	result.Assert(t, icmd.Success)
 
-			// expect local file to be unchanged
-			expected := fs.Expected(t, fs.WithFile(objectName, content))
-			assert.Assert(t, fs.Equal(workdir.Path(), expected))
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals(`DEBUG "cp s3://%v/%v %v": object is newer or same age`, bucket, filename, filename),
+	})
 
-			// expect s3 object to be unchanged
-			assert.Assert(t, ensureS3Object(s3client, bucket, objectName, "oldcontent"))
-		})
-	}
+	assertLines(t, result.Stderr(), map[int]compareFunc{})
+
+	expected := fs.Expected(t, fs.WithFile(filename, content))
+	assert.Assert(t, fs.Equal(workdir.Path(), expected))
 }
 
 // cp -u -s s3://bucket/prefix/* dir/
