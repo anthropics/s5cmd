@@ -1193,47 +1193,65 @@ func TestCopyDirToS3(t *testing.T) {
 }
 
 // cp dir/{file, folderWithBackslash} s3://bucket
+
 func TestCopyDirBackslashedToS3(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip()
-	}
 	t.Parallel()
 
-	s3client, s5cmd := setup(t)
+	t.Run("CopyDirBackslashedToS3", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				t.Parallel()
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+				const (
+					filename     = "file1.txt"
+					content      = "this is a test file"
+					backslashDir = `a`
+				)
 
-	folderLayout := []fs.PathOp{
-		fs.WithFile("readme.md", `¯\_(ツ)_/¯`),
-		fs.WithDir(
-			"t\\est",
-			fs.WithFile("filetest.txt", "try reaching me on windows :-)"),
-		),
-	}
-	workdir := fs.NewDir(t, t.Name(), folderLayout...)
-	defer workdir.Remove()
-	srcpath := workdir.Path()
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
+				bucket := s3BucketFromTestName(t)
 
-	cmd := s5cmd("cp", workdir.Path()+"/", dstpath)
-	result := icmd.RunCmd(cmd)
+				s3client, s5cmd := setup(t)
 
-	result.Assert(t, icmd.Success)
+				createBucket(t, s3client, bucket)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v/readme.md %vreadme.md`, srcpath, dstpath),
-		1: equals(`cp %v/t\est/filetest.txt %vt\est/filetest.txt`, srcpath, dstpath),
-	}, sortInput(true))
+				dirpath := filepath.Join("dir")
+				folderLayout := []fs.PathOp{
+					fs.WithDir(
+						dirpath,
+						fs.WithFile(filename, content),
+						fs.WithDir(backslashDir),
+					),
+				}
 
-	// assert local filesystem
-	expected := fs.Expected(t, folderLayout...)
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+				workdir := fs.NewDir(t, tc.storage, folderLayout...)
+				defer workdir.Remove()
 
-	// assert s3
-	assert.Assert(t, ensureS3Object(s3client, bucket, "readme.md", `¯\_(ツ)_/¯`))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "t\\est/filetest.txt", "try reaching me on windows :-)"))
+				// here using "/" to ensure that the source folder
+				// gets copied when ended with a "/"
+				srcpath := filepath.ToSlash(filepath.Join(workdir.Path(), dirpath)) + "/"
+				dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
+				cmd := s5cmd("cp", srcpath, dstpath)
+				result := icmd.RunCmd(cmd)
+
+				result.Assert(t, icmd.Success)
+
+				assertLines(t, result.Stdout(), map[int]compareFunc{
+					0: suffix(`cp %v %v%v/`, srcpath, dstpath, "dir"),
+				}, sortInput(true))
+
+				// assert local filesystem
+				expected := fs.Expected(t, folderLayout...)
+				assert.Assert(t, fs.Equal(workdir.Path(), expected))
+
+				// assert s3 objects
+				assert.Assert(t, ensureS3Object(s3client, bucket, filepath.Join(dirpath, filename), content))
+				assert.Assert(t, ensureS3Object(s3client, bucket, filepath.Join(dirpath, backslashDir)+"/", ""))
+			})
+		}
+	})
+}
 }
 
 // cp --storage-class=GLACIER file s3://bucket/
