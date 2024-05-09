@@ -3366,6 +3366,16 @@ func runTestMultipleLocalFileToS3Bucket(t *testing.T, tc *testCase) {
 
 // cp * s3://bucket/prefix/
 func TestCopyMultipleLocalNestedFilesToS3(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyMultipleLocalNestedFilesToS3(t, &tc)
+		})
+	}
+}
+
+func runTestCopyMultipleLocalNestedFilesToS3(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -3410,23 +3420,20 @@ func TestCopyMultipleLocalNestedFilesToS3(t *testing.T) {
 	workdir := fs.NewDir(t, t.Name(), folderLayout...)
 	defer workdir.Remove()
 
-	dst := fmt.Sprintf("s3://%v/prefix/", bucket)
+	dst := fmt.Sprintf("%v://%v/prefix/", tc.storage, bucket)
 
 	cmd := s5cmd("cp", "*", dst)
 	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
 
 	result.Assert(t, icmd.Success)
-
 	assertLines(t, result.Stdout(), map[int]compareFunc{
 		0: equals("cp a/file1.txt %va/file1.txt", dst),
 		1: equals("cp a/readme.md %va/readme.md", dst),
 		2: equals("cp b/c/file2.txt %vb/c/file2.txt", dst),
 	}, sortInput(true))
-
 	// assert local filesystem
 	expected := fs.Expected(t, folderLayout...)
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
 	// assert s3 objects
 	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/a/readme.md", "readme"))
 	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/a/file1.txt", "file1"))
