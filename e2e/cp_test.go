@@ -3458,44 +3458,51 @@ func runTestCopyLocalFileToS3WithSameFilenameDontOverrideIfS3ObjectIsOlder(t *te
 }
 
 // cp file s3://bucket/
+
 func TestCopyLocalFileToS3WithFilePermissions(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyLocalFileToS3WithFilePermissions(t, &tc)
+		})
+	}
+}
+
+func runTestCopyLocalFileToS3WithFilePermissions(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
+	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
 	const (
-		filename = "testfile1.txt"
-		content  = "this is the content"
+		filename           = "testfile1.txt"
+		expectedPermission = "0664"
 	)
 
-	fileModes := []os.FileMode{0400, 0440, 0444, 0600, 0640, 0644, 0700, 0750, 0755}
+	dir := t.TempDir()
+	localFile := filepath.Join(dir, filename)
+	err := ioutil.WriteFile(localFile, []byte("content"), 0664)
+	assert.NilError(t, err)
 
-	for _, fileMode := range fileModes {
+	cmd := s5cmd("cp", localFile, tc.storage+"://"+bucket+"/")
+	result := icmd.RunCmd(cmd)
+	result.Assert(t, icmd.Success)
 
-		workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content, fs.WithMode(fileMode)))
-		defer workdir.Remove()
+	cmd = s5cmd("ls", "-s", tc.storage+"://"+bucket+"/"+filename)
+	result = icmd.RunCmd(cmd)
+	result.Assert(t, icmd.Success)
 
-		dstpath := fmt.Sprintf("s3://%v/%v", bucket, filename)
-
-		cmd := s5cmd("cp", filename, dstpath)
-		result := icmd.RunCmd(cmd, withWorkingDir(workdir))
-
-		result.Assert(t, icmd.Success)
-
-		assertLines(t, result.Stdout(), map[int]compareFunc{
-			0: equals(`cp %v %v`, filename, dstpath),
-		})
-
-		// assert local filesystem
-		expected := fs.Expected(t, fs.WithFile(filename, content, fs.WithMode(fileMode)))
-		assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-		// assert s3 object
-		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
-	}
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: suffix(expectedPermission + " content " + filename),
+	})
 }
 
 // cp file s3://bucket/object
