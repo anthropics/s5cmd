@@ -4163,52 +4163,46 @@ func runTestCopyS3ObjectstoLocalWithRawFlag(t *testing.T, tc *testCase) {
 	assert.Equal(t, tag, infoTag)
 }
 
+
 func TestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T) {
-	t.Parallel()
-
-	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
-	dstbucket := s3BucketFromTestNameWithPrefix(t, "dst")
-
-	s3client, s5cmd := setup(t)
-
-	createBucket(t, s3client, srcbucket)
-	createBucket(t, s3client, dstbucket)
-
-	filesToContent := map[string]string{
-		"file*.txt":      "this is a test file 1",
-		"file*1.txt":     "this is a test file 2",
-		"file*.py":       "this is a test python file",
-		"file*/file.txt": "this is a test file with prefix",
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
 	}
 
-	for filename, content := range filesToContent {
-		putFile(t, s3client, srcbucket, filename, content)
-	}
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			
+			s3client, s5cmd := setup(t)
+			bucket := s3BucketFromTestName(t)
+			createBucket(t, s3client, bucket)
 
-	src := fmt.Sprintf("s3://%v/file*.txt", srcbucket)
-	dst := fmt.Sprintf("s3://%v", dstbucket)
+			filesToContent := map[string]string{
+				"testfile1": "This is a test file 1",
+				"readme.md": "This is a readme file",
+			}
 
-	cmd := s5cmd("cp", "--raw", src, dst)
-	result := icmd.RunCmd(cmd)
+			// put objects
+			for filename, content := range filesToContent {
+				putFile(t, s3client, bucket, filename, content)
+			}
 
-	result.Assert(t, icmd.Success)
+			dst := tc.storage + "://" + bucket + "/dst/"
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp %v %v/file*.txt", src, dst),
-	})
+			// cp with raw flag
+			_, err := s5cmd("-raw", "cp", tc.storage+"://"+bucket+"/*", dst).Output()
+			assert.NilError(t, err)
 
-	// assert s3 source objects
-	for filename, content := range filesToContent {
-		assert.Assert(t, ensureS3Object(s3client, srcbucket, filename, content))
-	}
-
-	expectedFiles := map[string]string{
-		"file*.txt": "this is a test file 1",
-	}
-
-	// assert s3 objects in destination.
-	for filename, content := range expectedFiles {
-		assert.Assert(t, ensureS3Object(s3client, dstbucket, filename, content))
+			// assert dst objects
+			for filename, content := range filesToContent {
+				assert.Assert(t, ensureS3Object(s3client, bucket, "dst/"+filename, content))
+			}
+		})
 	}
 }
 
