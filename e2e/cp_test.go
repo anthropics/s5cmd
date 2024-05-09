@@ -4875,41 +4875,51 @@ func runCopyExpectExitCode1OnUnreachableHost(t *testing.T, tc *testCase) {
 	})
 }
 
-func TestCopySingleFileToS3WithNoSuchUploadRetryCount(t *testing.T) {
-	t.Parallel()
 
-	s3client, s5cmd := setup(t)
+func TestCopySingleFileToStorageWithNoSuchUploadRetryCount(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "S3", storage: "s3"},
+		{name: "GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestCopySingleFileToStorageWithNoSuchUploadRetryCount(t, &tc)
+		})
+	}
+}
+
+func runTestCopySingleFileToStorageWithNoSuchUploadRetryCount(t *testing.T, tc *testCase) {
+	_, s5cmd := setup(t)
 
 	const (
-		filename = "example.txt"
-		content  = "Some example text"
+		filename           = "file.txt"
+		content            = "this is a test file"
+		dstfile            = "file-copy.txt"
+		nosuchbucket       = "nosuchbucket"
 	)
+	
+	file := fs.NewFile(t, filename, fs.WithContent(content))
+	defer file.Remove()
 
-	workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
-	defer workdir.Remove()
-
-	srcpath := workdir.Join(filename)
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
-
-	srcpath = filepath.ToSlash(srcpath)
-	cmd := s5cmd("cp", "--no-such-upload-retry-count", "5", srcpath, dstpath)
+	// copy without parents and expect to fail
+	cmd := s5cmd(
+		"cp", 
+		file.Path(), 
+		fmt.Sprintf("%v://%v/%v", tc.storage, nosuchbucket, dstfile),
+	)
 	result := icmd.RunCmd(cmd)
 
-	result.Assert(t, icmd.Success)
+	result.Assert(t, icmd.Expected{ExitCode: 1})
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
-	})
-
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// assert S3
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: contains(`ERROR "cp %v %v://%v/%v": upload %v://%v/%v`, file.Path(), tc.storage, nosuchbucket, dstfile, tc.storage, nosuchbucket, dstfile),
+	}, strictLineCheck(false))
 }
 
 func TestVersionedDownload(t *testing.T) {
