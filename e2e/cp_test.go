@@ -2696,57 +2696,49 @@ func TestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T) {
 }
 
 // --json cp s3://bucket/* s3://bucket/prefix/
-func TestCopyMultipleS3ObjectsToS3JSON(t *testing.T) {
-	t.Parallel()
 
+func TestCopyMultipleS3ObjectsToS3JSON(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyMultipleS3ObjectsToS3JSON(t, &tc)
+		})
+	}
+}
+
+func runTestCopyMultipleS3ObjectsToS3JSON(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
 
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
 	filesToContent := map[string]string{
-		"testfile1.txt": "this is a test file 1",
-		"readme.md":     "this is a readme file",
+		"testfile1.txt":           "this is a test file 1",
+		"readme.md":               "this is a readme file",
+		"b/filename-with-hypen.gz": "file has hypen in its name",
+		"a/another_test_file.txt": "yet another txt file. yatf.",
 	}
 
 	for filename, content := range filesToContent {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	src := fmt.Sprintf("s3://%v/*", bucket)
-	dst := fmt.Sprintf("s3://%v/dst/", bucket)
+	src := fmt.Sprintf("%s://%v/*", tc.storage, bucket)
+	dst := fmt.Sprintf("%s://%v/dst/", tc.storage, bucket)
 
 	cmd := s5cmd("--json", "cp", src, dst)
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: json(`
-			{
-				"operation": "cp",
-				"success": true,
-				"source": "s3://%v/readme.md",
-				"destination": "s3://%v/dst/readme.md",
-				"object": {
-					"key": "s3://%v/dst/readme.md",
-					"type": "file"
-				}
-			}
-		`, bucket, bucket, bucket),
-		1: json(`
-			{
-				"operation": "cp",
-				"success": true,
-				"source": "s3://%v/testfile1.txt",
-				"destination": "s3://%v/dst/testfile1.txt",
-				"object": {
-					"key": "s3://%v/dst/testfile1.txt",
-					"type": "file"
-				}
-			}
-		`, bucket, bucket, bucket),
-	}, sortInput(true), jsonCheck(true))
 
 	// assert s3 source objects
 	for filename, content := range filesToContent {
@@ -2754,6 +2746,14 @@ func TestCopyMultipleS3ObjectsToS3JSON(t *testing.T) {
 	}
 
 	// assert s3 destination objects
+	dstobj := "dst/"
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: json(`{"operation":"cp","success":true,"source":"%v/a/another_test_file.txt","destination":"%v/a/another_test_file.txt","object":{"type":"file","size":%d}}`, src, dstobj+bucket, len(filesToContent["a/another_test_file.txt"])),
+		1: json(`{"operation":"cp","success":true,"source":"%v/b/filename-with-hypen.gz","destination":"%v/b/filename-with-hypen.gz","object":{"type":"file","size":%d}}`, src, dstobj+bucket, len(filesToContent["b/filename-with-hypen.gz"])),
+		2: json(`{"operation":"cp","success":true,"source":"%v/readme.md","destination":"%v/readme.md","object":{"type":"file","size":%d}}`, src, dstobj+bucket, len(filesToContent["readme.md"])),
+		3: json(`{"operation":"cp","success":true,"source":"%v/testfile1.txt","destination":"%v/testfile1.txt","object":{"type":"file","size":%d}}`, src, dstobj+bucket, len(filesToContent["testfile1.txt"])),
+	}, jsonCheck(true))
+
 	for filename, content := range filesToContent {
 		assert.Assert(t, ensureS3Object(s3client, bucket, "dst/"+filename, content))
 	}
