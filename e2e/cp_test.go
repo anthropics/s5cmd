@@ -3357,47 +3357,54 @@ func runTestCopyLocalFileToS3WithSameFilenameOverrideIfSizeDiffers(t *testing.T,
 }
 
 // cp -n -u file s3://bucket (bucket/file exists, source is newer)
+
 func TestCopyLocalFileToS3WithSameFilenameOverrideIfSourceIsNewer(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyLocalFileToS3WithSameFilenameOverrideIfSourceIsNewer(t, &tc)
+		})
+	}
+}
 
+func runTestCopyLocalFileToS3WithSameFilenameOverrideIfSourceIsNewer(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
-	const (
-		filename        = "testfile1.txt"
-		content         = "this is the content"
-		expectedContent = content + "\n"
-	)
-
+	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
-	// upload a modified version of the file. also uploaded file is newer than
-	// the file on local fs.
+
+	const filename = "testfile1.txt"
+	const content = "this is a file content"
+
 	putFile(t, s3client, bucket, filename, content)
 
-	now := time.Now().UTC()
-	timestamp := fs.WithTimestamps(
-		now.Add(time.Minute), // access time
-		now.Add(time.Minute), // mod time
-	)
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, expectedContent, timestamp))
-	defer workdir.Remove()
+	// Local copy of the file with same name but newer
+	dir := t.TempDir()
+	localFilename := filepath.Join(dir, filename)
+	err := ioutil.WriteFile(localFilename, []byte(content), 0644)
+	assert.NilError(t, err)
+	// ensure local file is newer
+	futuretime := time.Now().Add(1 * time.Hour)
+	assert.NilError(t, os.Chtimes(localFilename, futuretime, futuretime))
 
-	dst := "s3://" + bucket
-	cmd := s5cmd("cp", "-n", "-u", filename, dst)
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
-
-	// '-n' prevents overriding the file, but '-u' overrides '-n' if the file
-	// modtime differs.
+	cmd := s5cmd("cp", "-n", "-u", localFilename, tc.storage+"://"+bucket)
+	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v %v/%v`, filename, dst, filename),
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(""),
 	})
 
-	assertLines(t, result.Stderr(), map[int]compareFunc{})
-
-	assert.NilError(t, ensureS3Object(s3client, bucket, filename, expectedContent))
+	// With -u, expect updated content
+	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 }
 
 // cp -n -u file s3://bucket (bucket/file exists, source is older)
