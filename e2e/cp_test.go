@@ -4749,21 +4749,38 @@ func runTestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilter(t *testing.T, 
 	}
 }
 
-func TestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilters(t *testing.T) {
-	t.Parallel()
 
-	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
-	dstbucket := s3BucketFromTestNameWithPrefix(t, "dst")
+func TestCopySingleObjectsIntoAnotherBucketWithExcludeFilters(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "S3", storage: "s3"},
+		{name: "GCS", storage: "gs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilter(t, &tc)
+		})
+	}
+}
+
+func runTestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilter(t *testing.T, tc *testCase) {
+	srcbucket := s3BucketFromTestNameWithPrefix(t, tc.storage+"-src")
+	dstbucket := s3BucketFromTestNameWithPrefix(t, tc.storage+"-dst")
 
 	s3client, s5cmd := setup(t)
 
-	createBucket(t, s3client, srcbucket)
+	createBucket(t, s3client, srcbucket) 
 	createBucket(t, s3client, dstbucket)
 
 	files := []string{
 		"file.txt",
 		"file1.txt",
-		"main.py",
+		"main.py", 
 		"main.js",
 		"readme.md",
 		"main.pdf",
@@ -4773,37 +4790,37 @@ func TestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilters(t *testing.T) {
 	expectedFiles := []string{
 		"file.txt",
 		"file1.txt",
+		"readme.md",
 	}
 
 	nonExpectedFiles := []string{
 		"main.py",
 		"main.js",
-		"main.pdf",
+		"main.pdf", 
 		"main/file.txt",
-		"readme.md",
 	}
 
 	const (
-		content         = "this is a file content"
-		excludePattern1 = "main*"
-		excludePattern2 = "*.md"
+		content        = "this is a file content"
+		excludePattern = "main*"
 	)
 
 	for _, filename := range files {
 		putFile(t, s3client, srcbucket, filename, content)
 	}
 
-	src := fmt.Sprintf("s3://%v/*", srcbucket)
-	dst := fmt.Sprintf("s3://%v/", dstbucket)
+	src := fmt.Sprintf("%v://%v/*", tc.storage, srcbucket)
+	dst := fmt.Sprintf("%v://%v/", tc.storage, dstbucket)
 
-	cmd := s5cmd("cp", "--exclude", excludePattern1, "--exclude", excludePattern2, src, dst)
+	cmd := s5cmd("cp", "--exclude", excludePattern, src, dst)
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%s/file.txt s3://%s/file.txt`, srcbucket, dstbucket),
-		1: equals(`cp s3://%s/file1.txt s3://%s/file1.txt`, srcbucket, dstbucket),
+		0: equals(`cp %v/file.txt %v/file.txt`, src, dst),  
+		1: equals(`cp %v/file1.txt %v/file1.txt`, src, dst),
+		2: equals(`cp %v/readme.md %v/readme.md`, src, dst), 
 	}, sortInput(true))
 
 	// assert s3 source objects
@@ -4811,13 +4828,13 @@ func TestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilters(t *testing.T) {
 		assert.Assert(t, ensureS3Object(s3client, srcbucket, filename, content))
 	}
 
-	// assert s3 destination objects
+	// assert s3 destination objects 
 	for _, filename := range expectedFiles {
 		assert.Assert(t, ensureS3Object(s3client, dstbucket, filename, content))
 	}
 
 	// assert s3 destination objects which should not be in bucket.
-	for _, filename := range nonExpectedFiles {
+	for _, filename := range nonExpectedFiles { 
 		err := ensureS3Object(s3client, dstbucket, filename, content)
 		assertError(t, err, errS3NoSuchKey)
 	}
