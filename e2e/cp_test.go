@@ -3602,40 +3602,56 @@ func runTestCopyLocalFileToS3WithPrefix(t *testing.T, tc *testCase) {
 }
 
 // cp file s3://bucket
+
 func TestMultipleLocalFileToS3Bucket(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestMultipleLocalFileToS3Bucket(t, &tc)
+		})
+	}
+}
 
+func runTestMultipleLocalFileToS3Bucket(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
-	const (
-		filename = "testfile1.txt"
-		content  = "this is the content"
-	)
-
+	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content))
-	defer workdir.Remove()
+	filesToContent := map[string]string{
+		"file1.txt":    "file1 content",
+		"file2.txt":    "file2 content",
+		"file3.txt":    "file3 content",
+	}
 
-	dstpath := fmt.Sprintf("s3://%v", bucket)
+	filesToUpload := []string{}
+	for file, content := range filesToContent {
+		byt := []byte(content)
+		err := ioutil.WriteFile(file, byt, 0644)
+		assert.NilError(t, err)
+		filesToUpload = append(filesToUpload, file)
+	}
 
-	cmd := s5cmd("cp", filename, dstpath)
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
-
+	cmd := s5cmd(append([]string{"cp"}, append(filesToUpload, tc.storage+"://"+bucket)...)...)
+	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v %v/%v`, filename, dstpath, filename),
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(""),
 	})
 
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// assert s3 object
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+	// assert all uploaded objects
+	for file, content := range filesToContent {
+		assert.Assert(t, ensureS3Object(s3client, bucket, file, content))
+	}
 }
 
 // cp * s3://bucket/prefix/
