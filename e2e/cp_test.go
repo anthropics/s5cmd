@@ -2579,27 +2579,44 @@ func runTestCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T, tc *testCase) {
 }
 
 // cp --flatten s3://bucket/* s3://bucket/prefix/
-func TestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T) {
-	t.Parallel()
 
+func TestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"}, 
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t, &tc)
+		})
+	}
+}
+
+func runTestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
 
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
 	filesToContent := map[string]string{
-		"testfile1.txt":            "this is a test file 1",
-		"readme.md":                "this is a readme file",
+		"testfile1.txt":           "this is a test file 1",
+		"readme.md":               "this is a readme file",
 		"b/filename-with-hypen.gz": "file has hypen in its name",
-		"a/another_test_file.txt":  "yet another txt file. yatf.",
+		"a/another_test_file.txt": "yet another txt file. yatf.",
 	}
 
 	for filename, content := range filesToContent {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	src := fmt.Sprintf("s3://%v/*", bucket)
-	dst := fmt.Sprintf("s3://%v/dst/", bucket)
+	src := fmt.Sprintf("%s://%v/*", tc.storage, bucket)
+	dst := fmt.Sprintf("%s://%v/dst/", tc.storage, bucket)
 
 	cmd := s5cmd("cp", "--flatten", src, dst)
 	result := icmd.RunCmd(cmd)
@@ -2607,10 +2624,10 @@ func TestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T) {
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/a/another_test_file.txt %vanother_test_file.txt`, bucket, dst),
-		1: equals(`cp s3://%v/b/filename-with-hypen.gz %vfilename-with-hypen.gz`, bucket, dst),
-		2: equals(`cp s3://%v/readme.md %vreadme.md`, bucket, dst),
-		3: equals(`cp s3://%v/testfile1.txt %vtestfile1.txt`, bucket, dst),
+		0: equals(`cp %v/a/another_test_file.txt %vanother_test_file.txt`, src, dst),  
+		1: equals(`cp %v/b/filename-with-hypen.gz %vfilename-with-hypen.gz`, src, dst),
+		2: equals(`cp %v/readme.md %vreadme.md`, src, dst),
+		3: equals(`cp %v/testfile1.txt %vtestfile1.txt`, src, dst),
 	}, sortInput(true))
 
 	// assert s3 source objects
@@ -2618,17 +2635,11 @@ func TestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T) {
 		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 	}
 
-	dstContent := map[string]string{
-		"dst/testfile1.txt":          "this is a test file 1",
-		"dst/readme.md":              "this is a readme file",
-		"dst/filename-with-hypen.gz": "file has hypen in its name",
-		"dst/another_test_file.txt":  "yet another txt file. yatf.",
-	}
-
-	// assert s3 destination objects
-	for key, content := range dstContent {
-		assert.Assert(t, ensureS3Object(s3client, bucket, key, content))
-	}
+	// assert flattened s3 destination objects
+	assert.Assert(t, ensureS3Object(s3client, bucket, "dst/another_test_file.txt", filesToContent["a/another_test_file.txt"]))
+	assert.Assert(t, ensureS3Object(s3client, bucket, "dst/filename-with-hypen.gz", filesToContent["b/filename-with-hypen.gz"]))
+	assert.Assert(t, ensureS3Object(s3client, bucket, "dst/readme.md", filesToContent["readme.md"]))
+	assert.Assert(t, ensureS3Object(s3client, bucket, "dst/testfile1.txt", filesToContent["testfile1.txt"]))
 }
 
 // cp s3://bucket/* s3://bucket/prefix
