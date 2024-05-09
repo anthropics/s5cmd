@@ -259,12 +259,28 @@ func runTestCopySingleObjectToLocalWithDestinationWildcard(t *testing.T, tc *tes
 
 // cp s3://bucket/prefix/ dir/
 
-func TestCopyS3PrefixToLocalMustReturnError(t *testing.T) {
+
+func TestCopyPrefixToLocalMustReturnError(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
 			t.Parallel()
-			runTestCopyPrefixToLocalMustReturnError(t, &tc)
+
+			bucket := s3BucketFromTestName(t)
+
+			s3client, s5cmd := setup(t)
+			createBucket(t, s3client, bucket)
+
+			const filename = "testfile1.txt"
+			putFile(t, s3client, bucket, filename, "")
+
+			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/", ".")
+			result := icmd.RunCmd(cmd)
+
+			result.Assert(t, icmd.Expected{
+				ExitCode: 1,
+				Err:      "Please provide a destination which is not a directory or use the --recursive flag",
+			})
 		})
 	}
 }
