@@ -1760,57 +1760,62 @@ func runTestCopyMultipleFilesToS3WithPrefixWithoutSlash(t *testing.T, tc *testCa
 }
 
 // cp prefix* s3://bucket/
-func TestCopyDirectoryWithGlobCharactersToS3Bucket(t *testing.T) {
-	t.Parallel()
 
-	if runtime.GOOS == "windows" {
-		t.Skip("Files in Windows cannot contain glob(*) characters")
+func TestCopyDirectoryWithGlobCharactersToS3Bucket(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"},
 	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyDirectoryWithGlobCharactersToS3Bucket(t, &tc)
+		})
+	}
+}
+
+func runTestCopyDirectoryWithGlobCharactersToS3Bucket(t *testing.T, tc *testCase) {
+	t.Parallel()
 
 	s3client, s5cmd := setup(t)
 
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
+	const (
+		globChar  = "special?char"
+		filename1 = "file1.txt"
+		filename2 = "file2.txt"
+		content   = "this is a test file"
+	)
+
 	folderLayout := []fs.PathOp{
-		fs.WithDir(
-			"abc*",
-			fs.WithFile("file1.txt", "this is the first test file"),
-			fs.WithFile("file2.txt", "this is the second test file"),
-		),
-		fs.WithDir(
-			"abcd",
-			fs.WithFile("file1.txt", "this is the first test file"),
-		),
-		fs.WithDir(
-			"abcde",
-			fs.WithFile("file1.txt", "this is the first test file"),
-			fs.WithFile("file2.txt", "this is the second test file"),
+		fs.WithDir(globChar,
+			fs.WithFile(filename1, content),
+			fs.WithFile(filename2, content),
 		),
 	}
 
-	workdir := fs.NewDir(t, "somedir", folderLayout...)
+	workdir := fs.NewDir(t, t.Name(), folderLayout...)
 	defer workdir.Remove()
 
-	src := fmt.Sprintf("%v/abc*", workdir.Path())
-	dst := fmt.Sprintf("s3://%v", bucket)
-
-	cmd := s5cmd("cp", src, dst)
+	cmd := s5cmd("cp", filepath.Join(workdir.Path(), fmt.Sprintf("%s*", globChar)), fmt.Sprintf("%s://%s/", tc.storage, bucket))
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v/abc*/file1.txt %v/abc*/file1.txt`, workdir.Path(), dst),
-		1: equals(`cp %v/abc*/file2.txt %v/abc*/file2.txt`, workdir.Path(), dst),
-		2: equals(`cp %v/abcd/file1.txt %v/abcd/file1.txt`, workdir.Path(), dst),
-		3: equals(`cp %v/abcde/file1.txt %v/abcde/file1.txt`, workdir.Path(), dst),
-		4: equals(`cp %v/abcde/file2.txt %v/abcde/file2.txt`, workdir.Path(), dst),
-	}, sortInput(true))
+		0: equals(`cp %s/%s %s://%s/%s`, globChar, tc.storage, bucket, globChar),
+	})
 
-	// assert local filesystem
-	expected := fs.Expected(t, folderLayout...)
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+	assert.Assert(t, ensureS3Dir(s3client, bucket, globChar))
+	assert.Assert(t, ensureS3Object(s3client, bucket, filepath.Join(globChar, filename1), content))
+	assert.Assert(t, ensureS3Object(s3client, bucket, filepath.Join(globChar, filename2), content))
 }
 
 // cp dir/* s3://bucket/prefix/
