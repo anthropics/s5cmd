@@ -288,7 +288,20 @@ func runTestCopyS3PrefixToLocalMustReturnError(t *testing.T, tc *testCase) {
 }
 
 // cp --flatten s3://bucket/* dir/ (flat source hiearchy)
+
 func TestCopyMultipleFlatS3ObjectsToLocal(t *testing.T) {
+	t.Parallel()
+	t.Run("CopyMultipleFlatS3ObjectsToLocal", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				runTestCopyMultipleFlatS3ObjectsToLocal(t, \&tc)
+			})
+		}
+	})
+}
+
+func runTestCopyMultipleFlatS3ObjectsToLocal(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -298,7 +311,7 @@ func TestCopyMultipleFlatS3ObjectsToLocal(t *testing.T) {
 
 	filesToContent := map[string]string{
 		"testfile1.txt":            "this is a test file 1",
-		"a/readme.md":              "this is a readme file",
+		"a/readme.md":              "this is a readme file", 
 		"a/filename-with-hypen.gz": "file has hypen in its name",
 		"b/another_test_file.txt":  "yet another txt file. yatf.",
 	}
@@ -307,16 +320,16 @@ func TestCopyMultipleFlatS3ObjectsToLocal(t *testing.T) {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	cmd := s5cmd("cp", "--flatten", "s3://"+bucket+"/*", ".")
+	cmd := s5cmd("cp", "--flatten", tc.storage+"://"+bucket+"/*", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/a/filename-with-hypen.gz filename-with-hypen.gz`, bucket),
-		1: equals(`cp s3://%v/a/readme.md readme.md`, bucket),
-		2: equals(`cp s3://%v/b/another_test_file.txt another_test_file.txt`, bucket),
-		3: equals(`cp s3://%v/testfile1.txt testfile1.txt`, bucket),
+		0: equals(`cp %s://%v/a/filename-with-hypen.gz filename-with-hypen.gz`, tc.storage, bucket),
+		1: equals(`cp %s://%v/a/readme.md readme.md`, tc.storage, bucket),
+		2: equals(`cp %s://%v/b/another_test_file.txt another_test_file.txt`, tc.storage, bucket),
+		3: equals(`cp %s://%v/testfile1.txt testfile1.txt`, tc.storage, bucket),
 	}, sortInput(true))
 
 	// assert local filesystem
@@ -324,7 +337,7 @@ func TestCopyMultipleFlatS3ObjectsToLocal(t *testing.T) {
 	var expectedFiles = []fs.PathOp{
 		fs.WithFile("testfile1.txt", "this is a test file 1"),
 		fs.WithFile("readme.md", "this is a readme file"),
-		fs.WithFile("filename-with-hypen.gz", "file has hypen in its name"),
+		fs.WithFile("filename-with-hypen.gz", "file has hypen in its name"), 
 		fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
 	}
 	expected := fs.Expected(t, expectedFiles...)
@@ -334,6 +347,7 @@ func TestCopyMultipleFlatS3ObjectsToLocal(t *testing.T) {
 	for filename, content := range filesToContent {
 		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 	}
+}
 }
 
 // cp --flatten s3://bucket/*.txt dir/
