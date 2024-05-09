@@ -3250,43 +3250,61 @@ func runTestCopyLocalFileToS3WithSameFilenameWithNoClobber(t *testing.T, tc *tes
 }
 
 // cp -n file s3://bucket
+
 func TestCopyLocalFileToS3WithNoClobber(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyLocalFileToS3WithNoClobber(t, &tc)
+		})
+	}
+}
 
+func runTestCopyLocalFileToS3WithNoClobber(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
-	const (
-		filename   = "testfile1.txt"
-		content    = "this is the content"
-		newContent = content + "\n"
-	)
-
+	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	// the file to be uploaded is modified
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, newContent))
-	defer workdir.Remove()
+	const filename = "testfile1.txt"
 
-	dst := "s3://" + bucket
-	cmd := s5cmd("cp", "-n", filename, dst)
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
+	dir := t.TempDir()
+	localFilename := filepath.Join(dir, filename)
+	err := ioutil.WriteFile(localFilename, []byte("content"), 0644)
+	assert.NilError(t, err)
 
+	cmd := s5cmd("cp", "-n", localFilename, tc.storage+"://"+bucket)
+	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v %v/%v`, filename, dst, filename),
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(""),
 	})
 
-	assertLines(t, result.Stderr(), map[int]compareFunc{})
+	assert.Assert(t, ensureS3Object(s3client, bucket, filename, "content"))
 
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, newContent))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+	// Overwrite local file and try again with -n
+	err = ioutil.WriteFile(localFilename, []byte("newcontent"), 0644)
+	assert.NilError(t, err)
 
-	// expect s3 object is not overridden
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, newContent))
+	cmd = s5cmd("cp", "-n", localFilename, tc.storage+"://"+bucket)
+	result = icmd.RunCmd(cmd)
+	result.Assert(t, icmd.Success)
+
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(""),
+	})
+
+	// With -n, expect original content
+	assert.Assert(t, ensureS3Object(s3client, bucket, filename, "content"))
 }
 
 // cp -n -s file s3://bucket (bucket/file exists)
