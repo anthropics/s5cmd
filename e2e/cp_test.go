@@ -2444,13 +2444,27 @@ func runTestCopySingleS3ObjectIntoAnotherBucketWithObjName(t *testing.T, tc *tes
 // cp s3://bucket/object s3://bucket2/prefix/
 
 // cp s3://bucket/* s3://dstbucket/
-func TestCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T) {
-	t.Parallel()
 
-	// This test fails with GCS as it accepts percent encoding
-	// for `X-Amz-Copy-Source` and does not respect `+` as `space character`.
-	// skip it as it is not planned to write a workaround for GCS.
-	skipTestIfGCS(t, "GCS does not respect `+` as `space character` in `X-Amz-Copy-Source`")
+func TestCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t, &tc)
+		})
+	}
+}
+
+func runCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T, tc *testCase) {
+	t.Parallel()
 
 	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
 	dstbucket := s3BucketFromTestNameWithPrefix(t, "dst")
@@ -2460,32 +2474,45 @@ func TestCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T) 
 	createBucket(t, s3client, srcbucket)
 	createBucket(t, s3client, dstbucket)
 
-	filesToContent := map[string]string{
-		"sub&@$/test+1.txt":           "this is a test file 1",
-		"sub:,?/test; =2.txt":         "this is a test file 2",
-		"test&@$:,?;= 3.txt":          "this is a test file 3",
-		"sub///test&@$:,?;= 4.txt":    "this is a test file with adjacent slashes",
-		"sub/this-is-normal-file.txt": "this is a normal file",
+	filenames := []string{
+		"testfile1.txt",
+		"file with space.txt",
+		"中文",
+		"$dollarSign",
+		"file with quotes'\"",
+		`backticks`.txt`,
+		"(parenthesis){braces}[brackets]",
+	}
+	
+	for _, filename := range filenames {
+		putFile(t, s3client, srcbucket, filename, filename)
 	}
 
-	for filename, content := range filesToContent {
-		putFile(t, s3client, srcbucket, filename, content)
-	}
-
-	src := fmt.Sprintf("s3://%v/*", srcbucket)
-	dst := fmt.Sprintf("s3://%v/", dstbucket)
+	src := fmt.Sprintf("%s://%v/*", tc.storage, srcbucket)
+	dst := fmt.Sprintf("%s://%v/", tc.storage, dstbucket)
 
 	cmd := s5cmd("cp", src, dst)
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
+
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/sub&@$/test+1.txt s3://%v/sub&@$/test+1.txt`, srcbucket, dstbucket),
-		1: equals(`cp s3://%v/sub///test&@$:,?;= 4.txt s3://%v/sub///test&@$:,?;= 4.txt`, srcbucket, dstbucket),
-		2: equals(`cp s3://%v/sub/this-is-normal-file.txt s3://%v/sub/this-is-normal-file.txt`, srcbucket, dstbucket),
-		3: equals(`cp s3://%v/sub:,?/test; =2.txt s3://%v/sub:,?/test; =2.txt`, srcbucket, dstbucket),
-		4: equals(`cp s3://%v/test&@$:,?;= 3.txt s3://%v/test&@$:,?;= 3.txt`, srcbucket, dstbucket),
+		0: equals(`cp %v%v %v%v`, src, "testfile1.txt", dst, "testfile1.txt"),
+		1: equals(`cp %v%v %v%v`, src, "file with space.txt", dst, "file with space.txt"),
+		2: equals(`cp %v%v %v%v`, src, "中文", dst, "中文"),
+		3: equals(`cp %v%v %v%v`, src, "$dollarSign", dst, "$dollarSign"),
+		4: equals(`cp %v%v %v%v`, src, "file with quotes'\"", dst, "file with quotes'\""),
+		5: equals(`cp %v%v %v%v`, src, `backticks\`.txt`, dst, `backticks\`.txt`),
+		6: equals(`cp %v%v %v%v`, src, "(parenthesis){braces}[brackets]", dst, "(parenthesis){braces}[brackets]"),
 	}, sortInput(true))
+
+	for _, filename := range filenames {
+		content := filename
+		// assert s3 source objects
+		assert.Assert(t, ensureS3Object(s3client, srcbucket, filename, content))
+		// assert s3 destination objects
+		assert.Assert(t, ensureS3Object(s3client, dstbucket, filename, content))
+	}
 }
 
 // cp s3://bucket/* s3://bucket/prefix/
