@@ -31,7 +31,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -3759,14 +3758,19 @@ func runTestCopyLocalObjectstoS3WithRawFlag(t *testing.T, tcCsp *testCase) {
 
 // When folder is uploaded with --raw flag, it only uploads file with given name.
 func TestCopyDirToS3WithRawFlag(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip()
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyDirToS3WithRawFlag(t, &tc)
+		})
 	}
+}
 
+func runTestCopyDirToS3WithRawFlag(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
@@ -3789,7 +3793,7 @@ func TestCopyDirToS3WithRawFlag(t *testing.T) {
 	defer workdir.Remove()
 
 	srcpath := filepath.ToSlash(workdir.Join("a*"))
-	dstpath := fmt.Sprintf("s3://%v", bucket)
+	dstpath := fmt.Sprintf(tc.storage+"://%v", bucket)
 
 	cmd := s5cmd("cp", "--raw", srcpath, dstpath)
 	result := icmd.RunCmd(cmd)
