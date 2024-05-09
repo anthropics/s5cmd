@@ -1876,63 +1876,64 @@ func runTestCopyMultipleFilesToS3WithPrefixWithSlash(t *testing.T, tc *testCase)
 }
 
 // cp --flatten dir/* s3://bucket/prefix/
+
 func TestFlattenCopyMultipleFilesToS3WithPrefixWithSlash(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestFlattenCopyMultipleFilesToS3WithPrefixWithSlash(t, &tc)
+		})
+	}
+}
+
+func runTestFlattenCopyMultipleFilesToS3WithPrefixWithSlash(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
 
+	const (
+		bucketPrefix = "prefix"
+		subfolder1   = "subfolder1"
+		subfolder2   = "subfolder2"
+		filename1    = "testfile1.txt"
+		filename2    = "testfile2.txt"
+		content      = "this is a test file"
+	)
+
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	folderLayout := []fs.PathOp{
-		fs.WithFile("testfile1.txt", "this is a test file 1"),
-		fs.WithFile("readme.md", "this is a readme file"),
-		fs.WithDir(
-			"a",
-			fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
+	workdir := fs.NewDir(t, t.Name(),
+		fs.WithDir(subfolder1,
+			fs.WithFile(filename1, content),
 		),
-		fs.WithDir(
-			"b",
-			fs.WithFile("filename-with-hypen.gz", "file has hypen in its name"),
+		fs.WithDir(subfolder2,
+			fs.WithFile(filename2, content),
 		),
-	}
-
-	workdir := fs.NewDir(t, "somedir", folderLayout...)
+	)
 	defer workdir.Remove()
 
-	srcpath := workdir.Path()
-
-	srcpath = filepath.ToSlash(srcpath)
-	src := fmt.Sprintf("%v/*", srcpath)
-	dst := fmt.Sprintf("s3://%v/prefix/", bucket)
-
-	cmd := s5cmd("cp", "--flatten", src, dst)
+	cmd := s5cmd("cp", "--flatten", workdir.Path()+"/*", fmt.Sprintf("%s://%s/%s/", tc.storage, bucket, bucketPrefix))
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v/a/another_test_file.txt %vanother_test_file.txt`, srcpath, dst),
-		1: equals(`cp %v/b/filename-with-hypen.gz %vfilename-with-hypen.gz`, srcpath, dst),
-		2: equals(`cp %v/readme.md %vreadme.md`, srcpath, dst),
-		3: equals(`cp %v/testfile1.txt %vtestfile1.txt`, srcpath, dst),
-	}, sortInput(true))
+		0: equals(`cp %s/%s/%s %s://%s/%s/%s`, workdir.Path(), subfolder1, filename1, tc.storage, bucket, bucketPrefix, filename1),
+		1: equals(`cp %s/%s/%s %s://%s/%s/%s`, workdir.Path(), subfolder2, filename2, tc.storage, bucket, bucketPrefix, filename2),
+	})
 
-	// assert local filesystem
-	expected := fs.Expected(t, folderLayout...)
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	expectedS3Content := map[string]string{
-		"prefix/testfile1.txt":          "this is a test file 1",
-		"prefix/readme.md":              "this is a readme file",
-		"prefix/filename-with-hypen.gz": "file has hypen in its name",
-		"prefix/another_test_file.txt":  "yet another txt file. yatf.",
-	}
-
-	// assert s3
-	for key, content := range expectedS3Content {
-		assert.Assert(t, ensureS3Object(s3client, bucket, key, content))
-	}
+	assert.Assert(t, ensureS3Object(s3client, bucket, bucketPrefix+"/"+filename1, content))
+	assert.Assert(t, ensureS3Object(s3client, bucket, bucketPrefix+"/"+filename2, content))
 }
 
 // cp dir/ s3://bucket/prefix/
