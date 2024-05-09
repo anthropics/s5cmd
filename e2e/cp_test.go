@@ -4439,43 +4439,55 @@ func runTestCopyS3ObjectsWithExcludeFilters(t *testing.T, tc *testCase) {
 }
 
 // cp --exclude ".txt" s3://bucket/abc* .
-func TestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T) {
-	t.Parallel()
 
+func TestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyS3ObjectsWithPrefixWithExcludeFilters(t, &tc)
+		})
+	}
+}
+
+func runTestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
 
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	const (
-		excludePattern1 = "*.txt"
-		fileContent     = "content"
-	)
+	const fileContent = "content"
 
 	files := [...]string{
-		"abc/file.txt",
-		"abc/file2.txt",
-		"abc/abc/file3.txt",
-		"abcd/main.py",
-		"ab/file.py",
-		"a/helper.c",
-		"abc.pdf",
+		"abc.txt",
+		"abc.dat",
+		"aaa.txt",
+		"aaa",
+		"abcd",
 	}
 
 	for _, filename := range files {
 		putFile(t, s3client, bucket, filename, fileContent)
 	}
 
-	srcpath := fmt.Sprintf("s3://%s/abc*", bucket)
+	srcpath := fmt.Sprintf("%s://%s", tc.storage, bucket)
 
-	cmd := s5cmd("cp", "--exclude", excludePattern1, srcpath, ".")
+	cmd := s5cmd("cp", "--exclude", ".txt", srcpath+"/abc*", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp s3://%s/abc.pdf abc.pdf", bucket),
-		1: equals("cp s3://%s/abcd/main.py abcd/main.py", bucket),
+		0: equals("cp %v/abc.dat %s", srcpath, files[1]),
+		1: equals("cp %v/abcd %s", srcpath, files[4]),
 	}, sortInput(true))
 
 	// assert s3
@@ -4484,13 +4496,10 @@ func TestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T) {
 	}
 
 	expectedFileSystem := []fs.PathOp{
-		fs.WithFile("abc.pdf", fileContent),
-		fs.WithDir(
-			"abcd",
-			fs.WithFile("main.py", fileContent),
-		),
+		fs.WithFile("abc.dat", fileContent),
+		fs.WithFile("abcd", fileContent),
 	}
-	// assert local filesystem
+	// assert local filesystem 
 	expected := fs.Expected(t, expectedFileSystem...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 }
