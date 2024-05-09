@@ -35,6 +35,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/fs"
 	"gotest.tools/v3/icmd"
@@ -490,7 +491,7 @@ func runTestCopyMultipleFlatS3ObjectsToLocalJSON(t *testing.T, tc *testCase) {
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
 		0: json(` { "operation": "cp", "success": true, "source": "%v://%v/a/filename-with-hypen.gz", "destination": "filename-with-hypen.gz", "object": { "type": "file", "size": 26 } }`, tc.storage, bucket),
-		1: json(` { "operation": "cp", "success": true, "source": "%v://%v/a/readme.md", "destination": "readme.md", "object": { "type": "file", "size": 22 } }`, tc.storage, bucket),
+		1: json(` { "operation": "cp", "success": true, "source": "%v://%v/a/readme.md", "destination": "readme.md", "object": { "type": "file", "size": 21 } }`, tc.storage, bucket),
 		2: json(` { "operation": "cp", "success": true, "source": "%v://%v/b/another_test_file.txt", "destination": "another_test_file.txt", "object": { "type": "file", "size": 27 } }`, tc.storage, bucket),
 		3: json(` { "operation": "cp", "success": true, "source": "%v://%v/testfile1.txt", "destination": "testfile1.txt", "object": { "type": "file", "size": 21 } }`, tc.storage, bucket),
 	}, sortInput(true), jsonCheck(true))
@@ -861,7 +862,17 @@ func runTestCopySingleFileToS3WithAllMetadataFlags(t *testing.T, tc *testCase) {
 	dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
 
 	srcpath = filepath.ToSlash(srcpath)
-	cmd := s5cmd("cp", "--no-guess-mime-type", "--content-type", contentType, "--content-disposition", contentDisposition, "--content-encoding", contentEncoding, "--content-language", contentLanguage, "--cache-control", cacheControl, srcpath, dstpath)
+	cmd := s5cmd("cp",
+		"--cache-control", cacheControl,
+		"--expires", expires,
+		"--storage-class", storageClass,
+		"--content-type", ContentType,
+		"--content-disposition", ContentDisposition,
+		"--content-encoding", ContentEncoding,
+		"--sse", EncryptionMethod,
+		"--sse-kms-key-id", EncryptionKeyID,
+		srcpath, dstpath,
+	)
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
@@ -901,7 +912,6 @@ func runTestCopySingleFileToS3WithArbitraryMetadata(t *testing.T, tc *testCase) 
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
@@ -913,27 +923,22 @@ func runTestCopySingleFileToS3WithArbitraryMetadata(t *testing.T, tc *testCase) 
 	workdir := fs.NewDir(t, "somedir", fs.WithFile(filename, content))
 	defer workdir.Remove()
 
-	srcpath := workdir.Join(filename)
+	srcpath := filepath.ToSlash(workdir.Join(filename))
 	dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
-
-	srcpath = filepath.ToSlash(srcpath)
-	cmd := s5cmd("cp", "--metadata", "key1=val1", "--metadata", "key2=val2", srcpath, dstpath)
+	metadata := map[string]*string{"Key1": aws.String("val1"), "Key2": aws.String("val2")}
+	cmd := s5cmd("cp", "--metadata", "Key1=val1", "--metadata", "Key2=val2", srcpath, dstpath)
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Success)
-
 	assertLines(t, result.Stdout(), map[int]compareFunc{
 		0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
 	})
-
 	// assert local filesystem
 	expected := fs.Expected(t, fs.WithFile(filename, content))
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
 	// assert S3/GCS
 	assert.Assert(t, ensureS3Object(
 		s3client, bucket, filename, content,
-		ensureArbitraryMetadata(map[string]*string{"key1": strPtr("val1"), "key2": strPtr("val2")}),
+		ensureArbitraryMetadata(metadata),
 	))
 }
 
@@ -975,7 +980,6 @@ func runTestCopyS3ToS3WithArbitraryMetadata(t *testing.T, tc *testCase) {
 	)
 
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
@@ -1155,11 +1159,8 @@ func runTestCopyDirToS3(t *testing.T, tc *testCase) {
 }
 
 // cp dir/{file, folderWithBackslash} s3://bucket
-
 func TestCopyDirBackslashedToS3(t *testing.T) {
-
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			runTestCopyDirBackslashedToS3(t, &tc)
 		})
@@ -1170,7 +1171,6 @@ func runTestCopyDirBackslashedToS3(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
@@ -1180,38 +1180,33 @@ func runTestCopyDirBackslashedToS3(t *testing.T, tc *testCase) {
 	)
 
 	folderLayout := []fs.PathOp{
-		fs.WithFile("folder/file", content),
-		fs.WithDir("foldernotherfolder"),
+		fs.WithFile("readme.md", `¯\_(ツ)_/¯`),
+		fs.WithDir(
+			"t\\est",
+			fs.WithFile("filetest.txt", "try reaching me on windows :-)"),
+		),
 	}
 
 	workdir := fs.NewDir(t, t.Name(), folderLayout...)
 	defer workdir.Remove()
 
-	srcpath := filepath.ToSlash(workdir.Path())
-	dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
+	srcpath := workdir.Path()
+	dstpath := fmt.Sprintf("s3://%v/", bucket)
 
-	cmd := s5cmd("cp", srcpath+"/folder", dstpath)
+	cmd := s5cmd("cp", workdir.Path()+"/", dstpath)
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp %v/folder/file %vfolder/file", srcpath, dstpath),
-	})
-
-	// assert s3 objects
-	err := ensureS3Object(s3client, bucket, "folder/file", content)
-	if err != nil {
-		t.Fatalf("%v does not exist in s3", "folder/file")
-	}
-
-	// assert only the file was uploaded and empty subfolder was skipped
-	err = ensureS3Object(s3client, bucket, "folder/anotherfolder/", "")
-	assertError(t, err, errS3NoSuchKey)
-
+		0: equals(`cp %v/readme.md %vreadme.md`, srcpath, dstpath),
+		1: equals(`cp %v/t\est/filetest.txt %vt\est/filetest.txt`, srcpath, dstpath),
+	}, sortInput(true))
 	// assert local filesystem
 	expected := fs.Expected(t, folderLayout...)
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+	// assert s3
+	assert.Assert(t, ensureS3Object(s3client, bucket, "readme.md", `¯\_(ツ)_/¯`))
+	assert.Assert(t, ensureS3Object(s3client, bucket, "t\\est/filetest.txt", "try reaching me on windows :-)"))
 }
 
 // cp --storage-class=GLACIER file s3://bucket/
