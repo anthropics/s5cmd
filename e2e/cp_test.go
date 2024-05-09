@@ -2170,7 +2170,26 @@ func runTestCopySingleObjectToObject(t *testing.T, tc *testCase) {
 }
 
 // --json cp s3://bucket/object s3://bucket2/object
+
 func TestCopySingleS3ObjectToS3JSON(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"}, 
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopySingleS3ObjectToS3JSON(t, &tc)
+		})
+	}
+}
+
+func runTestCopySingleS3ObjectToS3JSON(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -2178,44 +2197,30 @@ func TestCopySingleS3ObjectToS3JSON(t *testing.T) {
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
+	dstbucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, dstbucket)
+
 	const (
-		filename    = "testfile1.txt"
-		dstfilename = "copy_" + filename
-		content     = "this is a file content"
+		filename = "testfile1.txt"
+		content  = "this is a file content"
 	)
 
 	putFile(t, s3client, bucket, filename, content)
 
-	src := fmt.Sprintf("s3://%v/%v", bucket, filename)
-	dst := fmt.Sprintf("s3://%v/%v", bucket, dstfilename)
-
-	cmd := s5cmd("--json", "cp", src, dst)
+	cmd := s5cmd("--json", "cp", tc.storage+"://"+bucket+"/"+filename, tc.storage+"://"+dstbucket+"/"+filename)
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Success)
 
-	jsonText := fmt.Sprintf(`
-		{
-			"operation":"cp",
-			"success":true,
-			"source":"%v",
-			"destination":"%v",
-			"object": {
-				"key": "%v",
-				"type":"file"
-			}
-		}
-	`, src, dst, dst)
-
+	jsonText := ` { "operation": "cp", "success": true, "source": "%s://%v/testfile1.txt", "destination": "%s://%v/testfile1.txt", "object": { "type": "file", "size": 22 } } `
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: json(jsonText),
+		0: json(jsonText, tc.storage, bucket, tc.storage, dstbucket),
 	}, jsonCheck(true))
 
-	// assert s3 source object
+	// assert source object
 	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 
-	// assert s3 destination object
-	assert.Assert(t, ensureS3Object(s3client, bucket, dstfilename, content))
+	// assert destination object
+	assert.Assert(t, ensureS3Object(s3client, dstbucket, filename, content))
 }
 
 // cp s3://bucket/object s3://bucket2/
