@@ -293,7 +293,18 @@ func runTestCopyPrefixToLocalMustReturnError(t *testing.T, tc *testCase) {
 }
 
 // cp --flatten s3://bucket/* dir/ (flat source hiearchy)
-func TestCopyMultipleFlatS3ObjectsToLocal(t *testing.T) {
+
+func TestCopyMultipleFlatObjectsToLocalJSON(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyMultipleFlatObjectsToLocalJSON(t, &tc)
+		})
+	}
+}
+
+func runTestCopyMultipleFlatObjectsToLocalJSON(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -312,27 +323,27 @@ func TestCopyMultipleFlatS3ObjectsToLocal(t *testing.T) {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	cmd := s5cmd("cp", "--flatten", "s3://"+bucket+"/*", ".")
+	cmd := s5cmd("--json", "cp", "--flatten", tc.storage+"://"+bucket+"/*", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/a/filename-with-hypen.gz filename-with-hypen.gz`, bucket),
-		1: equals(`cp s3://%v/a/readme.md readme.md`, bucket),
-		2: equals(`cp s3://%v/b/another_test_file.txt another_test_file.txt`, bucket),
-		3: equals(`cp s3://%v/testfile1.txt testfile1.txt`, bucket),
-	}, sortInput(true))
+		0: json(` { "operation": "cp", "success": true, "source": "%v://%v/a/filename-with-hypen.gz", "destination": "filename-with-hypen.gz", "object": { "type": "file", "size": 26 } }`, tc.storage, bucket),
+		1: json(` { "operation": "cp", "success": true, "source": "%v://%v/a/readme.md", "destination": "readme.md", "object": { "type": "file", "size": 22 } }`, tc.storage, bucket),
+		2: json(` { "operation": "cp", "success": true, "source": "%v://%v/b/another_test_file.txt", "destination": "another_test_file.txt", "object": { "type": "file", "size": 27 } }`, tc.storage, bucket),
+		3: json(` { "operation": "cp", "success": true, "source": "%v://%v/testfile1.txt", "destination": "testfile1.txt", "object": { "type": "file", "size": 21 } }`, tc.storage, bucket),
+	}, sortInput(true), jsonCheck(true))
 
 	// assert local filesystem
 	// expect flattened directory structure
 	var expectedFiles = []fs.PathOp{
 		fs.WithFile("testfile1.txt", "this is a test file 1"),
-		fs.WithFile("readme.md", "this is a readme file"),
+		fs.WithFile("readme.md", "this is a readme file"),   
 		fs.WithFile("filename-with-hypen.gz", "file has hypen in its name"),
 		fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
 	}
-	expected := fs.Expected(t, expectedFiles...)
+	expected := fs.Expected(t, expectedFiles...)  
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 
 	// assert s3 objects
