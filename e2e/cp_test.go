@@ -40,7 +40,29 @@ import (
 	"gotest.tools/v3/icmd"
 )
 
+type testCase struct {
+	name    string
+	storage string
+}
+
+var testCases = []testCase{
+	{name: "AWS", storage: "s3"},
+	{name: "GCP", storage: "gs"},
+}
+
 func TestCopySingleS3ObjectToLocal(t *testing.T) {
+	t.Parallel()
+	t.Run("SingleS3ObjectToLocal", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				runTestCopySingleS3ObjectToLocal(t, &tc)
+			})
+		}
+	})
+}
+
+func runTestCopySingleS3ObjectToLocal(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	const (
@@ -55,28 +77,28 @@ func TestCopySingleS3ObjectToLocal(t *testing.T) {
 		expectedDst string
 	}{
 		{
-			name:        "cp s3://bucket/object .",
+			name:        "cp " + tc.storage + "://bucket/object .",
 			src:         "file1.txt",
 			dst:         ".",
 			expected:    fs.WithFile("file1.txt", fileContent, fs.WithMode(0644)),
 			expectedDst: "file1.txt",
 		},
 		{
-			name:        "cp s3://bucket/object file",
+			name:        "cp " + tc.storage + "://bucket/object file",
 			src:         "file1.txt",
 			dst:         "file1.txt",
 			expected:    fs.WithFile("file1.txt", fileContent, fs.WithMode(0644)),
 			expectedDst: "file1.txt",
 		},
 		{
-			name:        "cp s3://bucket/object dir/",
+			name:        "cp " + tc.storage + "://bucket/object dir/",
 			src:         "file1.txt",
 			dst:         "dir/",
 			expected:    fs.WithDir("dir", fs.WithFile("file1.txt", fileContent, fs.WithMode(0644))),
 			expectedDst: "dir/file1.txt",
 		},
 		{
-			name:        "cp s3://bucket/object dir/file",
+			name:        "cp " + tc.storage + "://bucket/object dir/file",
 			src:         "file1.txt",
 			dst:         "dir/file1.txt",
 			expected:    fs.WithDir("dir", fs.WithFile("file1.txt", fileContent, fs.WithMode(0644))),
@@ -84,28 +106,28 @@ func TestCopySingleS3ObjectToLocal(t *testing.T) {
 		},
 		// Cases with adjacent slashes. Expected behavior is to remove all duplicate slashes in local files.
 		{
-			name:        "cp s3://bucket//a/b///c////object .",
+			name:        "cp " + tc.storage + "://bucket//a/b///c////object .",
 			src:         "/a/b///c////file1.txt",
 			dst:         ".",
 			expected:    fs.WithFile("file1.txt", fileContent, fs.WithMode(0644)),
 			expectedDst: "file1.txt",
 		},
 		{
-			name:        "cp s3://bucket//a/b///c////object file",
+			name:        "cp " + tc.storage + "://bucket//a/b///c////object file",
 			src:         "/a/b///c////file1.txt",
 			dst:         "file1.txt",
 			expected:    fs.WithFile("file1.txt", fileContent, fs.WithMode(0644)),
 			expectedDst: "file1.txt",
 		},
 		{
-			name:        "cp s3://bucket//a/b///c////object dir/",
+			name:        "cp " + tc.storage + "://bucket//a/b///c////object dir/",
 			src:         "/a/b///c////file1.txt",
 			dst:         "dir/",
 			expected:    fs.WithDir("dir", fs.WithFile("file1.txt", fileContent, fs.WithMode(0644))),
 			expectedDst: "dir/file1.txt",
 		},
 		{
-			name:        "cp s3://bucket//a/b///c////object dir/file",
+			name:        "cp " + tc.storage + "://bucket//a/b///c////object dir/file",
 			src:         "/a/b///c////file1.txt",
 			dst:         "dir/file1.txt",
 			expected:    fs.WithDir("dir", fs.WithFile("file1.txt", fileContent, fs.WithMode(0644))),
@@ -145,119 +167,120 @@ func TestCopySingleS3ObjectToLocal(t *testing.T) {
 	}
 }
 
+func TestCopySingleObjectToLocalJSON(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestCopySingleObjectToLocalJSON(t, &tc)
+		})
+	}
+}
+
 // --json cp s3://bucket/object .
-func TestCopySingleS3ObjectToLocalJSON(t *testing.T) {
-	t.Parallel()
+func runTestCopySingleObjectToLocalJSON(t *testing.T, tc *testCase) {
+	t.Run(tc.name, func(t *testing.T) {
+		s3client, s5cmd := setup(t)
+		bucket := s3BucketFromTestName(t)
+		createBucket(t, s3client, bucket)
 
-	s3client, s5cmd := setup(t)
+		const (
+			filename = "testfile1.txt"
+			content  = "this is a file content"
+		)
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+		putFile(t, s3client, bucket, filename, content)
 
-	const (
-		filename = "testfile1.txt"
-		content  = "this is a file content"
-	)
+		cmd := s5cmd("--json", "cp", tc.storage+"://"+bucket+"/"+filename, ".")
+		result := icmd.RunCmd(cmd)
+		result.Assert(t, icmd.Success)
 
-	putFile(t, s3client, bucket, filename, content)
+		jsonText := ` { "operation": "cp", "success": true, "source": "%s://%v/testfile1.txt", "destination": "testfile1.txt", "object": { "type": "file", "size": 22 } } `
+		assertLines(t, result.Stdout(), map[int]compareFunc{
+			0: json(jsonText, tc.storage, bucket),
+		}, jsonCheck(true))
 
-	cmd := s5cmd("--json", "cp", "s3://"+bucket+"/"+filename, ".")
-	result := icmd.RunCmd(cmd)
+		// assert local filesystem
+		expected := fs.Expected(t, fs.WithFile(filename, content, fs.WithMode(0644)))
+		assert.Assert(t, fs.Equal(cmd.Dir, expected))
 
-	result.Assert(t, icmd.Success)
-
-	jsonText := `
-		{
-			"operation": "cp",
-			"success": true,
-			"source": "s3://%v/testfile1.txt",
-			"destination": "testfile1.txt",
-			"object": {
-				"type": "file",
-				"size": 22
-			}
-		}
-	`
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: json(jsonText, bucket),
-	}, jsonCheck(true))
-
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content, fs.WithMode(0644)))
-	assert.Assert(t, fs.Equal(cmd.Dir, expected))
-
-	// assert s3 object
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+		// assert s3 object
+		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+	})
 }
 
 // cp s3://bucket/object *
 func TestCopySingleS3ObjectToLocalWithDestinationWildcard(t *testing.T) {
 	t.Parallel()
 
-	s3client, s5cmd := setup(t)
+	for _, tc := range testCases {
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			s3client, s5cmd := setup(t)
+			bucket := s3BucketFromTestName(t)
+			createBucket(t, s3client, bucket)
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+			const (
+				filename = "testfile1.txt"
+				content  = "this is a file content"
+			)
 
-	const (
-		filename = "testfile1.txt"
-		content  = "this is a file content"
-	)
+			putFile(t, s3client, bucket, filename, content)
 
-	putFile(t, s3client, bucket, filename, content)
+			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, "*")
+			result := icmd.RunCmd(cmd)
+			result.Assert(t, icmd.Expected{ExitCode: 1})
 
-	cmd := s5cmd("cp", "s3://"+bucket+"/"+filename, "*")
-	result := icmd.RunCmd(cmd)
+			// ignore stdout. we expect error logs from stderr.
+			assertLines(t, result.Stderr(), map[int]compareFunc{
+				0: equals(`ERROR "cp %v://%v/%v *": target "*" can not contain glob characters`, tc.storage, bucket, filename),
+			})
 
-	result.Assert(t, icmd.Expected{ExitCode: 1})
-
-	// ignore stdout. we expect error logs from stderr.
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: equals(`ERROR "cp s3://%v/%v *": target "*" can not contain glob characters`, bucket, filename),
-	})
-
-	// assert local filesystem
-	expected := fs.Expected(t)
-	assert.Assert(t, fs.Equal(cmd.Dir, expected))
-
-	// assert s3 object
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+			// assert local filesystem
+			expected := fs.Expected(t)
+			assert.Assert(t, fs.Equal(cmd.Dir, expected))
+			// assert s3 object
+			assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+		})
+	}
 }
 
 // cp s3://bucket/prefix/ dir/
 func TestCopyS3PrefixToLocalMustReturnError(t *testing.T) {
 	t.Parallel()
 
-	s3client, s5cmd := setup(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			s3client, s5cmd := setup(t)
+			bucket := s3BucketFromTestName(t)
+			createBucket(t, s3client, bucket)
 
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+			const (
+				prefix     = "prefix/"
+				objectpath = prefix + "file1.txt"
+				content    = "this is a file content"
+			)
 
-	const (
-		prefix     = "prefix/"
-		objectpath = prefix + "file1.txt"
-		content    = "this is a file content"
-	)
+			putFile(t, s3client, bucket, objectpath, content)
 
-	putFile(t, s3client, bucket, objectpath, content)
+			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+prefix, ".")
+			result := icmd.RunCmd(cmd)
+			result.Assert(t, icmd.Expected{ExitCode: 1})
 
-	cmd := s5cmd("cp", "s3://"+bucket+"/"+prefix, ".")
-	result := icmd.RunCmd(cmd)
+			// ignore stdout. we expect error logs from stderr.
+			assertLines(t, result.Stderr(), map[int]compareFunc{
+				0: equals(`ERROR "cp %v://%v/%v .": source argument must contain wildcard character`, tc.storage, bucket, prefix),
+			})
 
-	result.Assert(t, icmd.Expected{ExitCode: 1})
-
-	// ignore stdout. we expect error logs from stderr.
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: equals(`ERROR "cp s3://%v/%v .": source argument must contain wildcard character`, bucket, prefix),
-	})
-
-	// assert local filesystem
-	expected := fs.Expected(t)
-	assert.Assert(t, fs.Equal(cmd.Dir, expected))
-
-	// assert s3 object
-	assert.Assert(t, ensureS3Object(s3client, bucket, objectpath, content))
+			// assert local filesystem
+			expected := fs.Expected(t)
+			assert.Assert(t, fs.Equal(cmd.Dir, expected))
+			// assert s3 object
+			assert.Assert(t, ensureS3Object(s3client, bucket, objectpath, content))
+		})
+	}
 }
 
 // cp --flatten s3://bucket/* dir/ (flat source hiearchy)

@@ -137,6 +137,10 @@ type credentialCfg struct {
 func setup(t *testing.T, options ...option) (*s3.S3, func(...string) icmd.Cmd) {
 	t.Helper()
 
+	if len(options) > 0 {
+		t.Logf("setup: with options: %v", options)
+	}
+
 	opts := &setupOpts{
 		s3backend: "bolt",
 	}
@@ -193,7 +197,7 @@ func setup(t *testing.T, options ...option) (*s3.S3, func(...string) icmd.Cmd) {
 	return client, s5cmd(workdir, endpoint)
 }
 
-func workdir(t *testing.T, opts *setupOpts) (*fs.Dir, string) {
+func workdir(t *testing.T, _ *setupOpts) (*fs.Dir, string) {
 	// testdir := fs.NewDir() tries to create a new directory which has a
 	// prefix = [test function name][operation name]
 	// e.g., prefix' = "TestCopySingleS3ObjectToLocal/cp_s3://bucket/object_file"
