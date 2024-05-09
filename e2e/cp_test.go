@@ -1186,10 +1186,26 @@ func runTestCopyDirToS3(t *testing.T, tc *testCase) {
 }
 
 // cp dir/{file, folderWithBackslash} s3://bucket
+
 func TestCopyDirBackslashedToS3(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"},
 	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel() 
+			runTestCopyDirBackslashedToS3(t, &tc)
+		})
+	}
+}
+
+func runTestCopyDirBackslashedToS3(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -1197,36 +1213,44 @@ func TestCopyDirBackslashedToS3(t *testing.T) {
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
+	const (
+		filename = "file1.txt"
+		content  = "this is a file"
+	)
+
 	folderLayout := []fs.PathOp{
-		fs.WithFile("readme.md", `¯\_(ツ)_/¯`),
-		fs.WithDir(
-			"t\\est",
-			fs.WithFile("filetest.txt", "try reaching me on windows :-)"),
-		),
+		fs.WithFile("folder/file", content),
+		fs.WithDir("foldernotherfolder"),
 	}
+
 	workdir := fs.NewDir(t, t.Name(), folderLayout...)
 	defer workdir.Remove()
-	srcpath := workdir.Path()
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
 
-	cmd := s5cmd("cp", workdir.Path()+"/", dstpath)
+	srcpath := filepath.ToSlash(workdir.Path())
+	dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
+
+	cmd := s5cmd("cp", srcpath+"/folder", dstpath)
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v/readme.md %vreadme.md`, srcpath, dstpath),
-		1: equals(`cp %v/t\est/filetest.txt %vt\est/filetest.txt`, srcpath, dstpath),
-	}, sortInput(true))
+		0: equals("cp %v/folder/file %vfolder/file", srcpath, dstpath),
+	})
+
+	// assert s3 objects
+	err := ensureS3Object(s3client, bucket, "folder/file", content)
+	if err != nil {
+		t.Fatalf("%v does not exist in s3", "folder/file")
+	}
+
+	// assert only the file was uploaded and empty subfolder was skipped
+	err = ensureS3Object(s3client, bucket, "folder/anotherfolder/", "")
+	assertError(t, err, errS3NoSuchKey)
 
 	// assert local filesystem
 	expected := fs.Expected(t, folderLayout...)
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// assert s3
-	assert.Assert(t, ensureS3Object(s3client, bucket, "readme.md", `¯\_(ツ)_/¯`))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "t\\est/filetest.txt", "try reaching me on windows :-)"))
-
 }
 
 // cp --storage-class=GLACIER file s3://bucket/
