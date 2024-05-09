@@ -2833,10 +2833,19 @@ func runTestCopyS3ToLocalWithSameFilenameOverrideIfSourceIsNewer(t *testing.T, t
 
 // cp -n -u s3://bucket/object dir/ (source is older)
 func TestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t, &tc)
+		})
+	}
+}
+
+func runTestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	bucket := s3BucketFromTestName(t)
-
 	s3client, s5cmd := setup(t)
 
 	const (
@@ -2858,7 +2867,7 @@ func TestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t *testing.T
 	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content, timestamp))
 	defer workdir.Remove()
 
-	cmd := s5cmd("--log=debug", "cp", "-n", "-u", "s3://"+bucket+"/"+filename, ".")
+	cmd := s5cmd("--log=debug", "cp", "-n", "-u", tc.storage+"://"+bucket+"/"+filename, ".")
 	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
 
 	// '-n' prevents overriding the file, but '-s' overrides '-n' if the file
@@ -2866,11 +2875,9 @@ func TestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t *testing.T
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`DEBUG "cp s3://%v/%v %v": object is newer or same age`, bucket, filename, filename),
+		0: equals(`DEBUG "cp %v://%v/%v %v": object is newer or same age`, tc.storage, bucket, filename, filename),
 	})
-
 	assertLines(t, result.Stderr(), map[int]compareFunc{})
-
 	expected := fs.Expected(t, fs.WithFile(filename, content))
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
 }
