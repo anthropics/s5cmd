@@ -2056,7 +2056,26 @@ func runTestFlattenCopyLocalDirectoryToS3WithPrefixWithSlash(t *testing.T, tc *t
 }
 
 // cp dir/ s3://bucket/prefix
+
 func TestCopyLocalDirectoryToS3WithPrefixWithoutSlash(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyLocalDirectoryToS3WithPrefixWithoutSlash(t, &tc)
+		})
+	}
+}
+
+func runTestCopyLocalDirectoryToS3WithPrefixWithoutSlash(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -2064,38 +2083,35 @@ func TestCopyLocalDirectoryToS3WithPrefixWithoutSlash(t *testing.T) {
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	filesToContent := map[string]string{
-		"testfile1.txt":          "this is a test file 1",
-		"readme.md":              "this is a readme file",
-		"filename-with-hypen.gz": "file has hypen in its name",
-		"another_test_file.txt":  "yet another txt file. yatf.",
+	const (
+		bucketPrefix = "prefix"
+		dirname      = "testdir"
+		filename1    = "testfile1.txt"  
+		filename2    = "testfile2.txt"
+		content      = "this is a test file"
+	)
+
+	dirLayout := []fs.PathOp{
+		fs.WithFile(filename1, content),
+		fs.WithFile(filename2, content),
 	}
 
-	var files []fs.PathOp
-	for filename, content := range filesToContent {
-		op := fs.WithFile(filename, content)
-		files = append(files, op)
-	}
-
-	workdir := fs.NewDir(t, "somedir", files...)
+	workdir := fs.NewDir(t, "somedir", fs.WithDir(dirname, dirLayout...))
 	defer workdir.Remove()
 
-	src := fmt.Sprintf("%v/", workdir.Path())
-	dst := fmt.Sprintf("s3://%v/prefix", bucket)
-
-	src = filepath.ToSlash(src)
-	cmd := s5cmd("cp", src, dst)
+	// cp dir/ s3://bucket/prefix 
+	cmd := s5cmd("cp", filepath.Join(workdir.Path(), dirname)+"/", fmt.Sprintf("%s://%s/%s", tc.storage, bucket, bucketPrefix))
 	result := icmd.RunCmd(cmd)
 
-	result.Assert(t, icmd.Expected{ExitCode: 1})
+	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: equals(`ERROR "cp %v %v": target %q must be a bucket or a prefix`, src, dst, dst),
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals(`cp %s %s://%s/%s`, dirname, tc.storage, bucket, bucketPrefix),
 	})
 
-	// assert local filesystem
-	expected := fs.Expected(t, files...)
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+	// assert s3 objects
+	assert.Assert(t, ensureS3Object(s3client, bucket, bucketPrefix+"/"+filename1, content))
+	assert.Assert(t, ensureS3Object(s3client, bucket, bucketPrefix+"/"+filename2, content))
 }
 
 // cp s3://bucket/object s3://bucket/object2
