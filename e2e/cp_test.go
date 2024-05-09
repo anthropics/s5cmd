@@ -4535,31 +4535,32 @@ func runTestLocalFileOverridenWhenDownloadFailed(t *testing.T, tc *testCase) {
 
 // Test that counting writer does not corrupt objects during a download process
 func TestCountingWriter(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestCountingWriter(t, &tc)
+		})
+	}
+}
+
+func runTestCountingWriter(t *testing.T, tc *testCase) {
 	t.Parallel()
-
-	const (
-		filename = "log.txt"
-	)
-
+	const filename = "log.txt"
 	content := randomString(3_000_000)
-
 	s3client, s5cmd := setup(t)
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 	putFile(t, s3client, bucket, filename, content)
-
-	cmd := s5cmd("cp", "--show-progress", "--concurrency", "3", "--part-size", "1", "s3://"+bucket+"/"+filename, ".")
+	cmd := s5cmd("cp", "--show-progress", "--concurrency", "3", "--part-size", "1", tc.storage+"://"+bucket+"/"+filename, ".")
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Success)
-
 	// assert the downloaded file has the same content with the remote object
 	expected := fs.Expected(t, fs.WithFile(filename, content, fs.WithMode(0644)))
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 }
 
 // It should skip special files
-
 func TestUploadingSocketFile(t *testing.T) {
 
 	for _, tc := range testCases {
