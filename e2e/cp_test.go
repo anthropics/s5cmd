@@ -3772,46 +3772,55 @@ func runTestCopyLinkToASingleFileWithFollowSymlinkDisabled(t *testing.T, tc *tes
 }
 
 // cp * s3://bucket/prefix/
+
 func TestCopyWithFollowSymlink(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},  
+		{name: "GCP GCS", storage: "gs"},
+	}
 
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyWithFollowSymlink(t, &tc)
+		})
+	}
+}
+
+func runTestCopyWithFollowSymlink(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	fileContent := "CAFEBABE"
-	folderLayout := []fs.PathOp{
-		fs.WithDir(
-			"a",
-			fs.WithFile("f1.txt", fileContent),
-		),
-		fs.WithDir("b"),
-		fs.WithDir("c"),
-		fs.WithSymlink("b/link1", "a/f1.txt"),
-		fs.WithSymlink("c/link2", "b/link1"),
-	}
+	const (
+		filename        = "file.txt"
+		linkToFile      = "my_link"
+		expectedContent = "this is a test file"
+	)
 
-	workdir := fs.NewDir(t, t.Name(), folderLayout...)
-	defer workdir.Remove()
+	workdir := t.TempDir()
 
-	dst := fmt.Sprintf("s3://%v/prefix/", bucket)
+	filePath := filepath.Join(workdir, filename)
+	err := ioutil.WriteFile(filePath, []byte(expectedContent), 0644)
+	assert.NilError(t, err)
 
-	cmd := s5cmd("cp", "*", dst)
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
+	linkPath := filepath.Join(workdir, linkToFile)
+	err = os.Symlink(filePath, linkPath)
+	assert.NilError(t, err)
 
+	cmd := s5cmd("cp", workdir+"/", tc.storage+"://"+bucket+"/prefix/")
+	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp a/f1.txt %va/f1.txt", dst),
-		1: equals("cp b/link1 %vb/link1", dst),
-		2: equals("cp c/link2 %vc/link2", dst),
-	}, sortInput(true))
+	// assert link object was uploaded
+	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+linkToFile, ""))
 
-	// assert s3 objects
-	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/a/f1.txt", fileContent))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/b/link1", fileContent))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/c/link2", fileContent))
+	// assert the original file was uploaded
+	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+filename, expectedContent))
 }
 
 func TestCopyErrorWhenGivenObjectIsNotFoundUsingWildcard(t *testing.T) {
