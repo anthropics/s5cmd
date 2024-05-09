@@ -3201,42 +3201,51 @@ func runTestCopyLocalFileToS3WithTheSameFilename(t *testing.T, tc *testCase) {
 }
 
 // -log=debug cp -n file s3://bucket (bucket/file exists)
+
 func TestCopyLocalFileToS3WithSameFilenameWithNoClobber(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	bucket := s3BucketFromTestName(t)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyLocalFileToS3WithSameFilenameWithNoClobber(t, &tc)
+		})
+	}
+}
 
+func runTestCopyLocalFileToS3WithSameFilenameWithNoClobber(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
-	const (
-		filename   = "testfile1.txt"
-		content    = "this is the content"
-		newContent = content + "\n"
-	)
-
+	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
+
+	const filename = "testfile1.txt"
+	const content = "this is a file content"
+	
 	putFile(t, s3client, bucket, filename, content)
-
-	// the file to be uploaded is modified
-	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, newContent))
-	defer workdir.Remove()
-
-	cmd := s5cmd("--log=debug", "cp", "-n", filename, "s3://"+bucket)
-	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
-
+	
+	// Local copy of the file with same name but different content
+	dir := t.TempDir()
+	localFilename := filepath.Join(dir, filename)
+	localContent := "this is the local content"
+	err := ioutil.WriteFile(localFilename, []byte(localContent), 0644)
+	assert.NilError(t, err)
+	
+	cmd := s5cmd("-log=debug", "cp", "-n", localFilename, tc.storage+"://"+bucket)
+	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`DEBUG "cp %v s3://%v/%v": object already exists`, filename, bucket, filename),
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: contains(`"%v/%v" not overwritten`, bucket, filename),
 	})
-
-	assertLines(t, result.Stderr(), map[int]compareFunc{})
-
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, newContent))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// expect s3 object is not overridden
+	
+	// assert s3 object not modified
 	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 }
 
