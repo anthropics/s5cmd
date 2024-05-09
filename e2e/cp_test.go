@@ -4497,6 +4497,16 @@ func runTestDeleteFileWhenDownloadFailed(t *testing.T, tc *testCase) {
 
 // Target local file should be overriden only if download completed successfully
 func TestLocalFileOverridenWhenDownloadFailed(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestLocalFileOverridenWhenDownloadFailed(t, &tc)
+		})
+	}
+}
+
+func runTestLocalFileOverridenWhenDownloadFailed(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -4514,7 +4524,7 @@ func TestLocalFileOverridenWhenDownloadFailed(t *testing.T) {
 
 	// It is going try downloading a nonexistent file from the s3 so it will fail.
 	// In this case we don't expect to have a local file will be overwritten.
-	cmd := s5cmd("cp", "s3://"+bucket+"/"+filename, filename)
+	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, filename)
 	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
 
 	result.Assert(t, icmd.Expected{ExitCode: 1})
