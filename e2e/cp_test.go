@@ -635,7 +635,20 @@ func runTestCopyMultipleNestedS3ObjectsToLocal(t *testing.T, tc *testCase) {
 }
 
 // cp s3://bucket/*/*.ext dir/
+
 func TestCopyMultipleNestedS3ObjectsToLocalWithPartial(t *testing.T) {
+	t.Parallel()
+	t.Run("CopyMultipleNestedS3ObjectsToLocalWithPartial", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				runTestCopyMultipleNestedS3ObjectsToLocalWithPartial(t, \\&tc)
+			})
+		}
+	})
+}
+
+func runTestCopyMultipleNestedS3ObjectsToLocalWithPartial(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -648,48 +661,46 @@ func TestCopyMultipleNestedS3ObjectsToLocalWithPartial(t *testing.T) {
 		"a/readme.md":                 "this is a readme file",
 		"a/b/filename-with-hypen.gz":  "file has hypen in its name",
 		"b/another_test_file.txt":     "yet another txt file. yatf.",
-		"c/d/e/another_test_file.txt": "yet another txt file. yatf.",
+		"c/d/e/f/deep_nested_file.txt":  "go deep or go home",
 	}
 
 	for filename, content := range filesToContent {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	cmd := s5cmd("cp", "s3://"+bucket+"/*/*.txt", ".")
+	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/*/*.txt", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/b/another_test_file.txt b/another_test_file.txt`, bucket),
-		1: equals(`cp s3://%v/c/d/e/another_test_file.txt c/d/e/another_test_file.txt`, bucket),
+		0: equals(`cp %s://%v/b/another_test_file.txt b/another_test_file.txt`, tc.storage, bucket),
+		1: equals(`cp %s://%v/c/d/e/f/deep_nested_file.txt c/d/e/f/deep_nested_file.txt`, tc.storage, bucket),
 	}, sortInput(true))
 
 	// assert local filesystem
-	expected := fs.Expected(
-		t,
-		fs.WithDir(
-			"b",
-			fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
+	var expectedFiles = []fs.PathOp{
+		fs.WithDir("b",
+		  fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
 		),
-		fs.WithDir(
-			"c",
-			fs.WithDir(
-				"d",
-				fs.WithDir(
-					"e",
-					fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
-				),
-			),
+		fs.WithDir("c",
+		  fs.WithDir("d",
+		    fs.WithDir("e",
+		      fs.WithDir("f",
+		        fs.WithFile("deep_nested_file.txt", "go deep or go home"),
+		      ),
+		    ),
+		  ),
 		),
-	)
-
+	}
+	expected := fs.Expected(t, expectedFiles...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 
 	// assert s3 objects
 	for filename, content := range filesToContent {
 		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 	}
+}
 }
 
 // cp s3://bucket/* dir/ (dir/ doesn't exist)
