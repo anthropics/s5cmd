@@ -410,7 +410,20 @@ func runTestCopyMultipleFlatS3ObjectsToLocalWithPartialMatching(t *testing.T, tc
 }
 
 // cp s3://bucket/*/*.txt dir/
+
 func TestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t *testing.T) {
+	t.Parallel()
+	t.Run("CopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				runTestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t, \\&tc)
+			})
+		}
+	})
+}
+
+func runTestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -419,32 +432,40 @@ func TestCopyMultipleFlatNestedS3ObjectsToLocalWithPartialMatching(t *testing.T)
 	createBucket(t, s3client, bucket)
 
 	filesToContent := map[string]string{
-		"testfile1.txt":     "test file 1",
-		"a/readme.md":       "this is a readme file",
-		"a/b/testfile2.txt": "test file 2",
+		"testfile1.txt":                 "this is a test file 1",
+		"a/readme.md":                   "this is a readme file",
+		"a/b/filename-with-hypen.gz":    "file has hypen in its name",
+		"a/another_test_file.txt":       "yet another txt file. yatf.",
+		"c/d/e/f/deep_nested_file.txt":  "go deep or go home",
 	}
 
 	for filename, content := range filesToContent {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	cmd := s5cmd("cp", "--flatten", "s3://"+bucket+"/*/*.txt", ".")
+	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/*/*.txt", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/a/b/testfile2.txt testfile2.txt`, bucket),
+		0: equals(`cp %s://%v/a/another_test_file.txt another_test_file.txt`, tc.storage, bucket),
+		1: equals(`cp %s://%v/c/d/e/f/deep_nested_file.txt deep_nested_file.txt`, tc.storage, bucket),
 	}, sortInput(true))
 
 	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile("testfile2.txt", "test file 2", fs.WithMode(0644)))
+	var expectedFiles = []fs.PathOp{
+		fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
+		fs.WithFile("deep_nested_file.txt", "go deep or go home"),
+	}
+	expected := fs.Expected(t, expectedFiles...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 
 	// assert s3 objects
 	for filename, content := range filesToContent {
 		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 	}
+}
 }
 
 // --json cp --flatten s3://bucket/* .
