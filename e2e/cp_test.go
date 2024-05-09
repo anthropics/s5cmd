@@ -23,7 +23,6 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -36,7 +35,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/fs"
 	"gotest.tools/v3/icmd"
@@ -4536,45 +4534,28 @@ func runTestLocalFileOverridenWhenDownloadFailed(t *testing.T, tc *testCase) {
 }
 
 // Test that counting writer does not corrupt objects during a download process
-
 func TestCountingWriter(t *testing.T) {
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
+	t.Parallel()
 
-			s3client, s5cmd := setup(t)
+	const (
+		filename = "log.txt"
+	)
 
-			bucket := s3BucketFromTestName(t)
-			createBucket(t, s3client, bucket)
+	content := randomString(3_000_000)
 
-			filename := "testfile1.txt"
-			content := "this is a test file"
-			putFile(t, s3client, bucket, filename, content)
+	s3client, s5cmd := setup(t)
+	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
+	putFile(t, s3client, bucket, filename, content)
 
-			defer s3client.RemoveObject(context.Background(), bucket, filename, minio.RemoveObjectOptions{})
+	cmd := s5cmd("cp", "--show-progress", "--concurrency", "3", "--part-size", "1", "s3://"+bucket+"/"+filename, ".")
+	result := icmd.RunCmd(cmd)
 
-			var buf aws.WriteAtBuffer
-			cw := &countingWriter{
-				writer: &buf,
-			}
+	result.Assert(t, icmd.Success)
 
-			cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, "-")
-			cmd.Stdout = cw
-
-			result := icmd.RunCmd(cmd)
-
-			result.Assert(t, icmd.Success)
-
-			if cw.bytesWritten != int64(len(buf.Bytes())) {
-				t.Fatalf("bytes written %d, wanted %d", cw.bytesWritten, len(buf.Bytes()))
-			}
-
-			if !bytes.Equal(buf.Bytes(), []byte(content)) {
-				t.Errorf("received %s, expected %s", string(buf.Bytes()), content)
-			}
-		})
-	}
+	// assert the downloaded file has the same content with the remote object
+	expected := fs.Expected(t, fs.WithFile(filename, content, fs.WithMode(0644)))
+	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 }
 
 // It should skip special files
