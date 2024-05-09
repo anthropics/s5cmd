@@ -3765,108 +3765,99 @@ func TestCopyDirToS3WithRawFlag(t *testing.T) {
 	}
 }
 
-func runTestCopyDirToS3WithRawFlag(t *testing.T, tc *testCase) {
-	t.Parallel()
-
-	s3client, s5cmd := setup(t)
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
-
-	folderLayout := []fs.PathOp{
-		fs.WithDir(
-			"a*",
-			fs.WithFile("file*.txt", "content"),
-			fs.WithFile("file*1.txt", "content"),
-		),
-		fs.WithDir(
-			"a*b",
-			fs.WithFile("file*2.txt", "content"),
-			fs.WithFile("file*3.txt", "content"),
-		),
-
-		fs.WithFile("file*4.txt", "content"),
-	}
-
-	workdir := fs.NewDir(t, t.Name(), folderLayout...)
-	defer workdir.Remove()
-
-	srcpath := filepath.ToSlash(workdir.Join("a*"))
-	dstpath := fmt.Sprintf(tc.storage+"://%v", bucket)
-
-	cmd := s5cmd("cp", "--raw", srcpath, dstpath)
-	result := icmd.RunCmd(cmd)
-
-	result.Assert(t, icmd.Success)
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp %v/file*.txt %v/a*/file*.txt", srcpath, dstpath),
-		1: equals("cp %v/file*1.txt %v/a*/file*1.txt", srcpath, dstpath),
-	}, sortInput(true))
-
-	expectedObjs := []string{"a*/file*.txt", "a*/file*1.txt"}
-	for _, obj := range expectedObjs {
-		err := ensureS3Object(s3client, bucket, obj, "content")
-		if err != nil {
-			t.Fatalf("Object %s is not in S3\n", obj)
-		}
-	}
-
-	nonExpectedObjs := []string{"a*b/file*2.txt", "a*b/file*3.txt", "file*.txt", "file*1.txt", "file*2.txt", "file*3.txt", "file*4.txt"}
-	for _, obj := range nonExpectedObjs {
-		err := ensureS3Object(s3client, bucket, obj, "content")
-		assertError(t, err, errS3NoSuchKey)
-	}
-
-	// assert local filesystem
-	expected := fs.Expected(t, folderLayout...)
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-}
-
 func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
+	t.Parallel()
+	const (
+		fileContent = "this is a file content"
+	)
 
-	for _, tc := range testCases {
+	testcases := []struct {
+		name           string
+		src            []string
+		wantedFile     string
+		expectedOutput string
+		expectedFiles  []fs.PathOp
+		rawFlag        string
+	}{
+		{
+			name:           "cp --raw file*.txt s3://bucket/",
+			src:            []string{"file*.txt", "file*1.txt", "file*2.txt"},
+			wantedFile:     "file*.txt",
+			expectedOutput: "cp s3://bucket/file*.txt file*txt",
+			rawFlag:        "--raw",
+			expectedFiles: []fs.PathOp{
+				fs.WithFile("file*.txt", fileContent),
+			},
+		},
+		{
+			name:       "cp  file*.txt s3://bucket/",
+			src:        []string{"file*.txt", "file*1.txt", "file*2.txt"},
+			wantedFile: "file*.txt",
+			rawFlag:    "",
+			expectedFiles: []fs.PathOp{
+				fs.WithFile("file*.txt", fileContent),
+				fs.WithFile("file*1.txt", fileContent),
+				fs.WithFile("file*2.txt", fileContent),
+			},
+		},
+		{
+			name:       "cp  a*/file.txt s3://bucket/",
+			src:        []string{"a*/file*.txt", "a*b/file1.txt", "a*c/file2.txt"},
+			wantedFile: "a*/file*.txt",
+			rawFlag:    "--raw",
+			expectedFiles: []fs.PathOp{
+				fs.WithFile("file*.txt", fileContent),
+			},
+		},
+		{
+			name:       "cp  a*/file.txt s3://bucket/",
+			src:        []string{"a*/file.txt", "a*/file1.txt", "a*/file2.txt"},
+			wantedFile: "a*/file.txt",
+			rawFlag:    "",
+			expectedFiles: []fs.PathOp{
+				fs.WithDir(
+					"a*",
+					fs.WithFile("file.txt", fileContent),
+				),
+			},
+		},
+	}
+
+	for _, tc := range testcases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runTestCopyS3ObjectstoLocalWithRawFlag(t, &tc)
+
+			bucket := s3BucketFromTestName(t)
+
+			s3client, s5cmd := setup(t)
+
+			createBucket(t, s3client, bucket)
+
+			for _, filename := range tc.src {
+				putFile(t, s3client, bucket, filename, fileContent)
+
+			}
+
+			cmd := s5cmd("cp", "s3://"+bucket+"/"+tc.wantedFile, ".")
+			if tc.rawFlag != "" {
+				cmd = s5cmd("cp", "--raw", "s3://"+bucket+"/"+tc.wantedFile, ".")
+			}
+
+			result := icmd.RunCmd(cmd)
+
+			result.Assert(t, icmd.Success)
+
+			// assert local file system
+			expected := fs.Expected(t, tc.expectedFiles...)
+			assert.Assert(t, fs.Equal(cmd.Dir, expected))
+
+			// assert s3 object
+			for _, filename := range tc.src {
+				assert.Assert(t, ensureS3Object(s3client, bucket, filename, fileContent))
+			}
 		})
 	}
-}
-
-func runTestCopyS3ObjectstoLocalWithRawFlag(t *testing.T, tc *testCase) {
-	s3client, s5cmd := setup(t)
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
-
-	content := "this is a test file"
-	filename := fs.NewUniqueID()
-
-	putFile(t, s3client, bucket, filename, content)
-
-	dir, err := os.MkdirTemp("", "")
-	assert.NilError(t, err)
-	defer os.RemoveAll(dir)
-
-	_, err = s5cmd("-raw", "cp", tc.storage+"://"+bucket+"/"+filename, dir).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	localFilename := filepath.Join(dir, filename)
-	fileContent, err := os.ReadFile(localFilename)
-	assert.NilError(t, err)
-	assert.Equal(t, content, string(fileContent))
-
-	tag := "PVQqAbPMQtL2Dhgc"
-
-	_, err = s5cmd("-raw", "tag", localFilename, tag).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	info := getObject(t, s3client, bucket, filename)
-	infoTag := info.Metadata["Tag"]
-	assert.Equal(t, tag, infoTag)
 }
 
 func TestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T) {
