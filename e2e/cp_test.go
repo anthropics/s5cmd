@@ -351,7 +351,20 @@ func runTestCopyMultipleFlatS3ObjectsToLocal(t *testing.T, tc *testCase) {
 }
 
 // cp --flatten s3://bucket/*.txt dir/
+
 func TestCopyMultipleFlatS3ObjectsToLocalWithPartialMatching(t *testing.T) {
+	t.Parallel()
+	t.Run("CopyMultipleFlatS3ObjectsToLocalWithPartialMatching", func(t *testing.T) {
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.storage, func(t *testing.T) {
+				runTestCopyMultipleFlatS3ObjectsToLocalWithPartialMatching(t, \&tc)
+			})
+		}
+	})
+}
+
+func runTestCopyMultipleFlatS3ObjectsToLocalWithPartialMatching(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -360,30 +373,31 @@ func TestCopyMultipleFlatS3ObjectsToLocalWithPartialMatching(t *testing.T) {
 	createBucket(t, s3client, bucket)
 
 	filesToContent := map[string]string{
-		"testfile1.txt":             "this is a test file 1",
-		"readme.md":                 "this is a readme file",
-		"filename-with-hypen.gz":    "file has hypen in its name",
-		"dir/another_test_file.txt": "yet another txt file",
+		"testfile1.txt":            "this is a test file 1",
+		"a/readme.md":              "this is a readme file", 
+		"a/filename-with-hypen.gz": "file has hypen in its name",
+		"b/another_test_file.txt":  "yet another txt file. yatf.",
 	}
 
 	for filename, content := range filesToContent {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	cmd := s5cmd("cp", "--flatten", "s3://"+bucket+"/*.txt", ".")
+	cmd := s5cmd("cp", "--flatten", tc.storage+"://"+bucket+"/*.txt", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/dir/another_test_file.txt another_test_file.txt`, bucket),
-		1: equals(`cp s3://%v/testfile1.txt testfile1.txt`, bucket),
+		0: equals(`cp %s://%v/b/another_test_file.txt another_test_file.txt`, tc.storage, bucket),
+		1: equals(`cp %s://%v/testfile1.txt testfile1.txt`, tc.storage, bucket),
 	}, sortInput(true))
 
 	// assert local filesystem
-	expectedFiles := []fs.PathOp{
-		fs.WithFile("testfile1.txt", "this is a test file 1", fs.WithMode(0644)),
-		fs.WithFile("another_test_file.txt", "yet another txt file", fs.WithMode(0644)),
+	// expect flattened directory structure
+	var expectedFiles = []fs.PathOp{
+		fs.WithFile("testfile1.txt", "this is a test file 1"),
+		fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
 	}
 	expected := fs.Expected(t, expectedFiles...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
@@ -392,6 +406,7 @@ func TestCopyMultipleFlatS3ObjectsToLocalWithPartialMatching(t *testing.T) {
 	for filename, content := range filesToContent {
 		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 	}
+}
 }
 
 // cp s3://bucket/*/*.txt dir/
