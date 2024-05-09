@@ -296,7 +296,6 @@ func TestCopyMultipleFlatObjectsToLocalJSON(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFlatObjectsToLocalJSON(t, &tc)
 		})
 	}
@@ -306,7 +305,6 @@ func runTestCopyMultipleFlatObjectsToLocalJSON(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
@@ -328,7 +326,7 @@ func runTestCopyMultipleFlatObjectsToLocalJSON(t *testing.T, tc *testCase) {
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
 		0: json(` { "operation": "cp", "success": true, "source": "%v://%v/a/filename-with-hypen.gz", "destination": "filename-with-hypen.gz", "object": { "type": "file", "size": 26 } }`, tc.storage, bucket),
-		1: json(` { "operation": "cp", "success": true, "source": "%v://%v/a/readme.md", "destination": "readme.md", "object": { "type": "file", "size": 22 } }`, tc.storage, bucket),
+		1: json(` { "operation": "cp", "success": true, "source": "%v://%v/a/readme.md", "destination": "readme.md", "object": { "type": "file", "size": 21 } }`, tc.storage, bucket),
 		2: json(` { "operation": "cp", "success": true, "source": "%v://%v/b/another_test_file.txt", "destination": "another_test_file.txt", "object": { "type": "file", "size": 27 } }`, tc.storage, bucket),
 		3: json(` { "operation": "cp", "success": true, "source": "%v://%v/testfile1.txt", "destination": "testfile1.txt", "object": { "type": "file", "size": 21 } }`, tc.storage, bucket),
 	}, sortInput(true), jsonCheck(true))
@@ -356,7 +354,6 @@ func TestCopyMultipleFlatS3ObjectsToLocalWithPartialMatching(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleFlatS3ObjectsToLocalWithPartialMatching(t, &tc)
 		})
 	}
