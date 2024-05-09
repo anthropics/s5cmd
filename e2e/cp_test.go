@@ -3958,39 +3958,56 @@ func runTestCopyDirToS3DryRun(t *testing.T, tc *testCase) {
 }
 
 // --dry-run cp s3://bucket/* dir/
+
 func TestCopyS3ToDirDryRun(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyS3ToDirDryRun(t, &tc)
+		})
+	}
+}
+
+func runTestCopyS3ToDirDryRun(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	files := [...]string{"c/file2.txt", "file1.txt"}
+	const (
+		filesCnt = 10
+	)
 
-	putFile(t, s3client, bucket, files[0], "content")
-	putFile(t, s3client, bucket, files[1], "content")
+	expectedFiles := make([]string, filesCnt)
+	for i := 0; i < filesCnt; i++ {
+		filename := fmt.Sprintf("file%d", i)
+		putFile(t, s3client, bucket, filename, filename)
+		expectedFiles[i] = filename
+	}
 
-	srcpath := fmt.Sprintf("s3://%s", bucket)
+	dir, err := os.MkdirTemp("", "")
+	assert.NilError(t, err)
+	defer os.RemoveAll(dir)
 
-	cmd := s5cmd("--dry-run", "cp", srcpath+"/*", "dir/")
+	cmd := s5cmd("--dry-run", "cp", tc.storage+"://"+bucket+"/*", dir+"/")
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp %v/c/file2.txt dir/%s", srcpath, files[0]),
-		1: equals("cp %v/file1.txt dir/%s", srcpath, files[1]),
-	}, sortInput(true))
+	// expect a line of output for each file
+	assert.Equal(t, len(result.Stdout()), filesCnt)
 
-	// not even outermost directory should be created
-	_, err := os.Stat(cmd.Dir + "/dir")
-	assert.Assert(t, os.IsNotExist(err))
-
-	// assert s3
-	for _, f := range files {
-		assert.Assert(t, ensureS3Object(s3client, bucket, f, "content"))
-	}
+	// assert no files were copied
+	dirEntries, err := os.ReadDir(dir)
+	assert.NilError(t, err)
+	assert.Equal(t, 0, len(dirEntries))
 }
 
 func TestCopyLocalObjectstoS3WithRawFlag(t *testing.T) {
