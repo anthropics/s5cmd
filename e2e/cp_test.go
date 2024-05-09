@@ -3874,6 +3874,16 @@ func runTestCopyS3ObjectstoLocalWithRawFlag(t *testing.T, tcCsp *testCase) {
 }
 
 func TestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rawTestCopyMultipleS3ObjectsToS3WithRawMode(t, &tc)
+		})
+	}
+}
+
+func rawTestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T, tcCsp *testCase) {
 	t.Parallel()
 
 	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
@@ -3895,14 +3905,12 @@ func TestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T) {
 		putFile(t, s3client, srcbucket, filename, content)
 	}
 
-	src := fmt.Sprintf("s3://%v/file*.txt", srcbucket)
-	dst := fmt.Sprintf("s3://%v", dstbucket)
+	src := fmt.Sprintf(tcCsp.storage+"://%v/file*.txt", srcbucket)
+	dst := fmt.Sprintf(tcCsp.storage+"://%v", dstbucket)
 
 	cmd := s5cmd("cp", "--raw", src, dst)
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Success)
-
 	assertLines(t, result.Stdout(), map[int]compareFunc{
 		0: equals("cp %v %v/file*.txt", src, dst),
 	})
@@ -3915,7 +3923,6 @@ func TestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T) {
 	expectedFiles := map[string]string{
 		"file*.txt": "this is a test file 1",
 	}
-
 	// assert s3 objects in destination.
 	for filename, content := range expectedFiles {
 		assert.Assert(t, ensureS3Object(s3client, dstbucket, filename, content))
