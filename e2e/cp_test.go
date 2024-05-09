@@ -536,17 +536,28 @@ func runTestCopyMultipleFlatS3ObjectsToLocalJSON(t *testing.T, tc *testCase) {
 }
 
 // cp s3://bucket/* dir/ (nested source hierarchy)
+
 func TestCopyMultipleNestedS3ObjectsToLocal(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyMultipleNestedS3ObjectsToLocal(t, &tc)
+		})
+	}
+}
+
+func runTestCopyMultipleNestedS3ObjectsToLocal(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
 
 	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
+	createBucket(t, s3client, bucket) 
 
 	filesToContent := map[string]string{
 		"testfile1.txt":               "this is a test file 1",
-		"a/readme.md":                 "this is a readme file",
+		"a/readme.md":                 "this is a readme file",  
 		"a/b/filename-with-hypen.gz":  "file has hypen in its name",
 		"b/another_test_file.txt":     "yet another txt file. yatf.",
 		"c/d/e/another_test_file.txt": "yet another txt file. yatf.",
@@ -556,17 +567,17 @@ func TestCopyMultipleNestedS3ObjectsToLocal(t *testing.T) {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	cmd := s5cmd("cp", "s3://"+bucket+"/*", ".")
+	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/*", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%v/a/b/filename-with-hypen.gz a/b/filename-with-hypen.gz`, bucket),
-		1: equals(`cp s3://%v/a/readme.md a/readme.md`, bucket),
-		2: equals(`cp s3://%v/b/another_test_file.txt b/another_test_file.txt`, bucket),
-		3: equals(`cp s3://%v/c/d/e/another_test_file.txt c/d/e/another_test_file.txt`, bucket),
-		4: equals(`cp s3://%v/testfile1.txt testfile1.txt`, bucket),
+		0: equals(`cp %v://%v/a/b/filename-with-hypen.gz a/b/filename-with-hypen.gz`, tc.storage, bucket),
+		1: equals(`cp %v://%v/a/readme.md a/readme.md`, tc.storage, bucket),
+		2: equals(`cp %v://%v/b/another_test_file.txt b/another_test_file.txt`, tc.storage, bucket),
+		3: equals(`cp %v://%v/c/d/e/another_test_file.txt c/d/e/another_test_file.txt`, tc.storage, bucket),
+		4: equals(`cp %v://%v/testfile1.txt testfile1.txt`, tc.storage, bucket),
 	}, sortInput(true))
 
 	// assert local filesystem
@@ -581,7 +592,7 @@ func TestCopyMultipleNestedS3ObjectsToLocal(t *testing.T) {
 			),
 		),
 		fs.WithDir(
-			"b",
+			"b",  
 			fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
 		),
 		fs.WithDir(
@@ -598,7 +609,7 @@ func TestCopyMultipleNestedS3ObjectsToLocal(t *testing.T) {
 	expected := fs.Expected(t, expectedFiles...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 
-	// assert s3 objects
+	// assert remote objects  
 	for filename, content := range filesToContent {
 		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 	}
