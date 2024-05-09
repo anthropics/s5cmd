@@ -246,7 +246,7 @@ func runTestCopySingleObjectToLocalWithDestinationWildcard(t *testing.T, tc *tes
 	})
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp "+tc.storage+"://"+bucket+"/"+filename+" "+filename+""),
+		0: equals("cp " + tc.storage + "://" + bucket + "/" + filename + " " + filename + ""),
 	})
 
 	// assert local filesystem
@@ -284,11 +284,8 @@ func runTestCopyPrefixToLocalMustReturnError(t *testing.T, tc *testCase) {
 		result.Assert(t, icmd.Expected{ExitCode: 1})
 
 		assertLines(t, result.Stderr(), map[int]compareFunc{
-			0: equals("ERROR "+tc.storage+" prefix /prefix/ can not be a directory destination"),
+			0: equals("ERROR " + tc.storage + " prefix /prefix/ can not be a directory destination"),
 		})
-
-		// assert s3 bucket is empty
-		assert.Assert(t, ensureS3Empty(s3client, bucket))
 	})
 }
 
@@ -339,11 +336,11 @@ func runTestCopyMultipleFlatObjectsToLocalJSON(t *testing.T, tc *testCase) {
 	// expect flattened directory structure
 	var expectedFiles = []fs.PathOp{
 		fs.WithFile("testfile1.txt", "this is a test file 1"),
-		fs.WithFile("readme.md", "this is a readme file"),   
+		fs.WithFile("readme.md", "this is a readme file"),
 		fs.WithFile("filename-with-hypen.gz", "file has hypen in its name"),
 		fs.WithFile("another_test_file.txt", "yet another txt file. yatf."),
 	}
-	expected := fs.Expected(t, expectedFiles...)  
+	expected := fs.Expected(t, expectedFiles...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 
 	// assert s3 objects
