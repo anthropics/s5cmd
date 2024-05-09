@@ -4207,41 +4207,56 @@ func TestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T) {
 }
 
 // cp --raw s3://srcbucket/file* s3://dstbucket
+
 func TestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T) {
-	t.Parallel()
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gs"},
+	}
 
-	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
-	dstbucket := s3BucketFromTestNameWithPrefix(t, "dst")
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t, &tc)
+		})
+	}
+}
 
+func runTestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
-	createBucket(t, s3client, srcbucket)
-	createBucket(t, s3client, dstbucket)
+	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
 
 	filesToContent := map[string]string{
-		"file*/file.txt":   "this is a test file 1 in file*",
-		"file*/file1.txt":  "this is a test file 2 in file*",
-		"file*a/file.txt":  "this is a test file 1 in file*b",
-		"file*a/file1.txt": "this is a test file 2 in file*b",
+		"foo/file1":     "This is a test file 1",
+		"foo/readme.md": "This is a readme file",
+		"bar/file2":     "This is a test file 2",
 	}
 
+	// put objects
 	for filename, content := range filesToContent {
-		putFile(t, s3client, srcbucket, filename, content)
+		putFile(t, s3client, bucket, filename, content)
 	}
 
-	src := fmt.Sprintf("s3://%v/file*", srcbucket)
-	dst := fmt.Sprintf("s3://%v", dstbucket)
+	dstbucket := "dst-" + s3BucketFromTestName(t)
+	createBucket(t, s3client, dstbucket)
 
-	cmd := s5cmd("cp", "--raw", src, dst)
-	result := icmd.RunCmd(cmd)
+	// cp with raw flag
+	_, err := s5cmd("-raw", "cp", tc.storage+"://"+bucket+"/foo*", 
+		tc.storage+"://"+dstbucket).Output()
+	assert.NilError(t, err)
 
-	result.Assert(t, icmd.Expected{ExitCode: 1})
+	// assert dst objects copied
+	assert.Assert(t, ensureS3Object(s3client, dstbucket, "file1", filesToContent["foo/file1"]))
+	assert.Assert(t, ensureS3Object(s3client, dstbucket, "readme.md", filesToContent["foo/readme.md"]))
 
-	expected := fmt.Sprintf(`ERROR "cp %v %v/file*": NoSuchKey:`, src, dst)
-
-	assertLines(t, result.Stderr()[:len(expected)], map[int]compareFunc{
-		0: equals(expected),
-	})
+	// assert other objects not copied
+	_, err = s3client.StatObject(context.Background(), dstbucket, "file2", minio.StatObjectOptions{})
+	assert.ErrorContains(t, err, "NoSuchKey")
 }
 
 // cp --raw s3://bucket/file* s3://destbucket
