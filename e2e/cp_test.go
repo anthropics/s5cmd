@@ -3766,11 +3766,18 @@ func TestCopyDirToS3WithRawFlag(t *testing.T) {
 }
 
 func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
-	t.Parallel()
-	const (
-		fileContent = "this is a file content"
-	)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestCopyS3ObjectstoLocalWithRawFlag(t, &tc)
+		})
+	}
+}
 
+func runTestCopyS3ObjectstoLocalWithRawFlag(t *testing.T, tcCsp *testCase) {
+	t.Parallel()
+	const fileContent = "this is a file content"
 	testcases := []struct {
 		name           string
 		src            []string
@@ -3780,7 +3787,7 @@ func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
 		rawFlag        string
 	}{
 		{
-			name:           "cp --raw file*.txt s3://bucket/",
+			name:           "cp --raw file*.txt " + tcCsp.storage + "://bucket/",
 			src:            []string{"file*.txt", "file*1.txt", "file*2.txt"},
 			wantedFile:     "file*.txt",
 			expectedOutput: "cp s3://bucket/file*.txt file*txt",
@@ -3790,7 +3797,7 @@ func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
 			},
 		},
 		{
-			name:       "cp  file*.txt s3://bucket/",
+			name:       "cp  file*.txt " + tcCsp.storage + "://bucket/",
 			src:        []string{"file*.txt", "file*1.txt", "file*2.txt"},
 			wantedFile: "file*.txt",
 			rawFlag:    "",
@@ -3801,7 +3808,7 @@ func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
 			},
 		},
 		{
-			name:       "cp  a*/file.txt s3://bucket/",
+			name:       "cp  a*/file.txt " + tcCsp.storage + "://bucket/",
 			src:        []string{"a*/file*.txt", "a*b/file1.txt", "a*c/file2.txt"},
 			wantedFile: "a*/file*.txt",
 			rawFlag:    "--raw",
@@ -3810,7 +3817,7 @@ func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
 			},
 		},
 		{
-			name:       "cp  a*/file.txt s3://bucket/",
+			name:       "cp  a*/file.txt " + tcCsp.storage + "://bucket/",
 			src:        []string{"a*/file.txt", "a*/file1.txt", "a*/file2.txt"},
 			wantedFile: "a*/file.txt",
 			rawFlag:    "",
@@ -3839,9 +3846,9 @@ func TestCopyS3ObjectstoLocalWithRawFlag(t *testing.T) {
 
 			}
 
-			cmd := s5cmd("cp", "s3://"+bucket+"/"+tc.wantedFile, ".")
+			cmd := s5cmd("cp", tcCsp.storage+"://"+bucket+"/"+tc.wantedFile, ".")
 			if tc.rawFlag != "" {
-				cmd = s5cmd("cp", "--raw", "s3://"+bucket+"/"+tc.wantedFile, ".")
+				cmd = s5cmd("cp", "--raw", tcCsp.storage+"://"+bucket+"/"+tc.wantedFile, ".")
 			}
 
 			result := icmd.RunCmd(cmd)
