@@ -26,6 +26,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -852,13 +853,20 @@ func runTestCopySingleFileToS3WithAllMetadataFlags(t *testing.T, tc *testCase) {
 	createBucket(t, s3client, bucket)
 
 	const (
-		filename             = "cachecontrol_index.html"
-		content              = "<html></html>"
+		filename             = "index"
+		content              = `testfilecontent`
+		cacheControl         = "public, max-age=3600"
+		expires              = "2025-01-01T00:00:00Z"
+		storageClass         = "STANDARD_IA"
+		ContentType          = "text/html; charset=utf-8"
+		ContentDisposition   = "inline"
+		ContentEncoding      = "utf-8"
+		EncryptionMethod     = "aws:kms"
+		EncryptionKeyID      = "1234abcd-12ab-34cd-56ef-1234567890ab"
 		contentType          = "text/html"
 		contentDisposition   = "inline"
 		contentEncoding      = "gzip"
 		contentLanguage      = "en"
-		cacheControl         = "no-cache"
 		expectedContentType  = contentType
 		expectedEncoding     = contentEncoding
 		expectedLanguage     = contentLanguage
@@ -866,6 +874,14 @@ func runTestCopySingleFileToS3WithAllMetadataFlags(t *testing.T, tc *testCase) {
 		expectedDisposition  = contentDisposition
 		expectedStorageClass = "STANDARD"
 	)
+
+	// expected expires flag is the parsed version of the date in RFC3339 format
+	parsedTime, err := time.Parse(time.RFC3339, expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedExpires := parsedTime.Format(http.TimeFormat)
 
 	workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
 	defer workdir.Remove()
@@ -887,16 +903,16 @@ func runTestCopySingleFileToS3WithAllMetadataFlags(t *testing.T, tc *testCase) {
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
 
 	// assert S3/GCS
-	assert.Assert(t,
-		ensureS3Object(
-			s3client, bucket, filename, content,
-			ensureContentType(expectedContentType),
-			ensureContentDisposition(expectedDisposition),
-			ensureContentEncoding(expectedEncoding),
-			ensureContentLanguage(expectedLanguage),
-			ensureCacheControl(expectedCacheControl),
-		),
-	)
+	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content,
+		ensureExpires(expectedExpires),
+		ensureCacheControl(cacheControl),
+		ensureStorageClass(storageClass),
+		ensureContentType(ContentType),
+		ensureContentDisposition(ContentDisposition),
+		ensureContentEncoding(ContentEncoding),
+		ensureEncryptionMethod(EncryptionMethod),
+		ensureEncryptionKeyID(EncryptionKeyID),
+	))
 }
 
 // cp dir/file s3://bucket/ --metadata key1=val1 --metadata key2=val2 ...
@@ -3535,7 +3551,6 @@ func runTestCopyWithFollowSymlink(t *testing.T, tc *testCase) {
 }
 
 func TestCopyErrorWhenGivenObjectIsNotFoundUsingWildcard(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -3547,15 +3562,12 @@ func TestCopyErrorWhenGivenObjectIsNotFoundUsingWildcard(t *testing.T) {
 
 func runTestCopyErrorWhenGivenObjectIsNotFoundUsingWildcard(t *testing.T, tc *testCase) {
 	_, s5cmd := setup(t)
-
 	cmd := s5cmd("cp", tc.storage+"://bucket/*.txt", ".")
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Expected{ExitCode: 1})
-
 	assertLines(t, result.Stderr(), map[int]compareFunc{
 		0: equals(`ERROR "cp %v://bucket/*.txt ." object not found`, tc.storage),
-	}, inOrder(true))
+	}, sortInput(true))
 }
 
 // cp --no-follow-symlinks * s3://bucket/prefix/
