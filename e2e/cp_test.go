@@ -2225,6 +2225,7 @@ func runTestCopySingleS3ObjectToS3JSON(t *testing.T, tc *testCase) {
 
 // cp s3://bucket/object s3://bucket2/
 
+
 func TestCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T) {
 	testCases := []struct {
 		name    string
@@ -2238,9 +2239,47 @@ func TestCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runCopySingleS3ObjectIntoAnotherBucketWithPrefix(t, &tc)
+			runTestCopySingleS3ObjectIntoAnotherBucketWithPrefix(t, &tc)
 		})
 	}
+}
+
+func runTestCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T, tc *testCase) {
+	t.Parallel()
+
+	s3client, s5cmd := setup(t)
+
+	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
+	dstbucket := s3BucketFromTestNameWithPrefix(t, "dst")
+
+	createBucket(t, s3client, srcbucket)
+	createBucket(t, s3client, dstbucket)
+
+	const (
+		filename = "testfile1.txt"
+		content  = "this is a file content"
+		prefix   = "prefix/"
+	)
+
+	putFile(t, s3client, srcbucket, filename, content)
+
+	src := fmt.Sprintf("%s://%v/%v", tc.storage, srcbucket, filename)
+	dst := fmt.Sprintf("%s://%v/%v", tc.storage, dstbucket, prefix)
+
+	cmd := s5cmd("cp", src, dst)
+	result := icmd.RunCmd(cmd)
+
+	result.Assert(t, icmd.Success)
+
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals(`cp %v %v%v`, src, dst, filename),
+	})
+
+	// assert source object
+	assert.Assert(t, ensureS3Object(s3client, srcbucket, filename, content))
+
+	// assert destination object
+	assert.Assert(t, ensureS3Object(s3client, dstbucket, prefix+filename, content))
 }
 
 func runCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T, tc *testCase) {
@@ -2403,39 +2442,6 @@ func runTestCopySingleS3ObjectIntoAnotherBucketWithObjName(t *testing.T, tc *tes
 }
 
 // cp s3://bucket/object s3://bucket2/prefix/
-func TestCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T) {
-	t.Parallel()
-
-	s3client, s5cmd := setup(t)
-
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
-
-	const (
-		filename = "testfile1.txt"
-		content  = "this is a file content"
-	)
-
-	putFile(t, s3client, bucket, filename, content)
-
-	src := fmt.Sprintf("s3://%v/%v", bucket, filename)
-	dst := fmt.Sprintf("s3://%v/prefix/%v", bucket, filename)
-
-	cmd := s5cmd("cp", src, dst)
-	result := icmd.RunCmd(cmd)
-
-	result.Assert(t, icmd.Success)
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v %v`, src, dst),
-	})
-
-	// assert s3 source object
-	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
-
-	// assert s3 destination object
-	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+filename, content))
-}
 
 // cp s3://bucket/* s3://dstbucket/
 func TestCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T) {
