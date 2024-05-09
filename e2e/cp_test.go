@@ -4465,6 +4465,16 @@ func runTestVersionedDownload(t *testing.T, tc *testCase) {
 // Before downloading a file from s3 a local target file is created. If download
 // fails the created file should be deleted.
 func TestDeleteFileWhenDownloadFailed(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			t.Parallel()
+			runTestDeleteFileWhenDownloadFailed(t, &tc)
+		})
+	}
+}
+
+func runTestDeleteFileWhenDownloadFailed(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -4488,7 +4498,6 @@ func TestDeleteFileWhenDownloadFailed(t *testing.T) {
 // Target local file should be overriden only if download completed successfully
 
 func TestLocalFileOverridenWhenDownloadFailed(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
