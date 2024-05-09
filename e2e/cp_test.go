@@ -1327,7 +1327,26 @@ func runTestCopySingleFileToS3WithStorageClassGlacier(t *testing.T, tc *testCase
 }
 
 // cp --flatten dir/ s3://bucket/
+
 func TestFlattenCopyDirToS3(t *testing.T) {
+	testCases := []struct {
+		name    string
+		storage string
+	}{
+		{name: "AWS S3", storage: "s3"},
+		{name: "GCP GCS", storage: "gcs"}, 
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runTestFlattenCopyDirToS3(t, &tc)
+		})
+	}
+}
+
+func runTestFlattenCopyDirToS3(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
@@ -1335,42 +1354,43 @@ func TestFlattenCopyDirToS3(t *testing.T) {
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
+	const (
+		subfolder = "subfolder"
+		filename  = "file1.txt" 
+		content   = "this is a file"
+	)
+
 	folderLayout := []fs.PathOp{
-		fs.WithFile("file1.txt", "this is the first test file"),
-		fs.WithFile("readme.md", "this is a readme file"),
 		fs.WithDir(
-			"c",
-			fs.WithFile("file2.txt", "this is the second test file"),
+			subfolder,
+			fs.WithFile(filename, content),
 		),
 	}
 
 	workdir := fs.NewDir(t, t.Name(), folderLayout...)
 	defer workdir.Remove()
-	srcpath := workdir.Path()
-	srcpath = filepath.ToSlash(srcpath)
-	dstpath := fmt.Sprintf("s3://%v/", bucket)
 
-	// this command ('s5cmd cp dir/ s3://bucket/') will run in 'walk' mode,
-	// which is different than 'glob' mode.
-	cmd := s5cmd("cp", "--flatten", workdir.Path()+"/", dstpath)
+	cmd := s5cmd("cp", "--flatten", filepath.Join(workdir.Path(), subfolder), fmt.Sprintf("%s://%s/", tc.storage, bucket))
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v/c/file2.txt %vfile2.txt`, srcpath, dstpath),
-		1: equals(`cp %v/file1.txt %vfile1.txt`, srcpath, dstpath),
-		2: equals(`cp %v/readme.md %vreadme.md`, srcpath, dstpath),
-	}, sortInput(true))
+		0: equals(`cp %s/%s %s://%s/%s`, subfolder, filename, tc.storage, bucket, filename),
+	})
+
+	// assert s3 object
+	err := ensureS3Object(s3client, bucket, filename, content)
+	if err != nil {
+		t.Fatalf("%s not uploaded to s3: %v", filename, err)
+	}
+
+	err = ensureS3Object(s3client, bucket, "subfolder/", "")
+	assertError(t, err, errS3NoSuchKey)
 
 	// assert local filesystem
 	expected := fs.Expected(t, folderLayout...)
 	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// assert s3
-	assert.Assert(t, ensureS3Object(s3client, bucket, "file1.txt", "this is the first test file"))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "readme.md", "this is a readme file"))
-	assert.Assert(t, ensureS3Object(s3client, bucket, "file2.txt", "this is the second test file"))
 }
 
 // cp dir/* s3://bucket/
