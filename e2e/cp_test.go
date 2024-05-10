@@ -953,7 +953,7 @@ func TestCopyS3ToS3WithArbitraryMetadata(t *testing.T) {
 }
 
 func runTestCopyS3ToS3WithArbitraryMetadata(t *testing.T, tc *testCase) {
-	if tc.storage == "gcs" {
+	if tc.name == "GCS" {
 		// TODO(rr)
 		t.Skip("skipping test for GCS")
 	}
@@ -1275,7 +1275,6 @@ func TestCopySingleFileToS3WithStorageClassGlacier(t *testing.T) {
 // cp --flatten dir/ s3://bucket/
 
 func TestFlattenCopyDirToS3(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -1307,14 +1306,12 @@ func runTestFlattenCopyDirToS3(t *testing.T, tc *testCase) {
 
 	workdir := fs.NewDir(t, t.Name(), folderLayout...)
 	defer workdir.Remove()
-
-	cmd := s5cmd("cp", "--flatten", filepath.Join(workdir.Path(), subfolder), fmt.Sprintf("%s://%s/", tc.storage, bucket))
+	path := filepath.Join(workdir.Path(), subfolder)
+	cmd := s5cmd("cp", "--flatten", path, fmt.Sprintf("%s://%s/", tc.storage, bucket))
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Success)
-
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %s/%s %s://%s/%s`, subfolder, filename, tc.storage, bucket, filename),
+		0: equals(`cp %s/%s %s://%s/%s`, path, filename, tc.storage, bucket, filename),
 	})
 
 	// assert s3 object
@@ -1344,9 +1341,7 @@ func TestCopyMultipleFilesToS3Bucket(t *testing.T) {
 
 func runTestCopyMultipleFilesToS3Bucket(t *testing.T, tc *testCase) {
 	t.Parallel()
-
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
@@ -1355,7 +1350,6 @@ func runTestCopyMultipleFilesToS3Bucket(t *testing.T, tc *testCase) {
 		"readme.md":                 "this is a readme",
 		"filename-with-symbols-@$%": "some contents",
 	}
-
 	var files []fs.PathOp
 	for filename, content := range filesToContent {
 		op := fs.WithFile(filename, content)
