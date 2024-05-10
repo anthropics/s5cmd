@@ -4566,46 +4566,63 @@ func runUploadingSocketFile(t *testing.T, tc *testCase) {
 	// assert exit code
 	result.Assert(t, icmd.Expected{ExitCode: 1})
 }
-
-// cp --include "*.py" s3://bucket/* .
-
 func TestCopyS3ObjectsWithIncludeFilter(t *testing.T) {
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
-			runCopyS3ObjectsWithIncludeFilter(t, &tc)
+			runTestCopyS3ObjectsWithIncludeFilter(t, &tc)
 		})
 	}
 }
 
-func runCopyS3ObjectsWithIncludeFilter(t *testing.T, tc *testCase) {
+// cp --include "*.py" s3://bucket/* .
+func runTestCopyS3ObjectsWithIncludeFilter(t *testing.T, tc *testCase) {
+	t.Parallel()
+
 	s3client, s5cmd := setup(t)
 
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	filesToContent := map[string]string{
-		"testfile1.txt": "this is a test file 1",
-		"testfile2.txt": "this is a test file 2",
-		"testfile3.py":  "print('hello world!')",
+	const (
+		includePattern = "*.py"
+		fileContent    = "content"
+	)
+
+	files := [...]string{
+		"file1.py",
+		"file2.py",
+		"file.txt",
+		"a.txt",
+		"src/file.txt",
 	}
 
-	for filename, content := range filesToContent {
-		putFile(t, s3client, bucket, filename, content)
+	for _, filename := range files {
+		putFile(t, s3client, bucket, filename, fileContent)
 	}
 
-	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/*", ".", "--include", "*.py")
+	srcpath := fmt.Sprintf("%v://%s", tc.storage, bucket)
+
+	cmd := s5cmd("cp", "--include", includePattern, srcpath+"/*", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: equals(""),
-	}, strictLineCheck(true))
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals("cp %v/file1.py %s", srcpath, files[0]),
+		1: equals("cp %v/file2.py %s", srcpath, files[1]),
+	}, sortInput(true))
 
+	// assert s3
+	for _, f := range files {
+		assert.Assert(t, ensureS3Object(s3client, bucket, f, fileContent))
+	}
+
+	expectedFileSystem := []fs.PathOp{
+		fs.WithFile("file1.py", fileContent),
+		fs.WithFile("file2.py", fileContent),
+	}
 	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile("testfile3.py", filesToContent["testfile3.py"], fs.WithMode(0644)))
+	expected := fs.Expected(t, expectedFileSystem...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 }
 
