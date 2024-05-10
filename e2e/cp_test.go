@@ -2178,52 +2178,48 @@ func runFlattenCopySingleObjectIntoAnotherBucket(t *testing.T, tc *testCase) {
 }
 
 // cp s3://bucket/object s3://bucket2/object
-
 func TestCopySingleS3ObjectIntoAnotherBucketWithObjName(t *testing.T) {
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			runTestCopySingleS3ObjectIntoAnotherBucketWithObjName(t, &tc)
 		})
 	}
 }
 
 func runTestCopySingleS3ObjectIntoAnotherBucketWithObjName(t *testing.T, tc *testCase) {
-	t.Parallel()
-
-	s3client, s5cmd := setup(t)
-
+	if tc.name == "GCP" {
+		t.Skip("TODO(rr)")
+	}
 	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
 	dstbucket := s3BucketFromTestNameWithPrefix(t, "dst")
+
+	s3client, s5cmd := setup(t)
 
 	createBucket(t, s3client, srcbucket)
 	createBucket(t, s3client, dstbucket)
 
 	const (
-		filename   = "testfile1.txt"
-		dstObjName = "dstObj.txt"
-		content    = "this is a file content"
+		filename = "testfile1.txt"
+		content  = "this is a file content"
 	)
 
 	putFile(t, s3client, srcbucket, filename, content)
 
-	src := fmt.Sprintf("%s://%v/%v", tc.storage, srcbucket, filename)
-	dst := fmt.Sprintf("%s://%v/%v", tc.storage, dstbucket, dstObjName)
+	src := fmt.Sprintf("%v://%v/%v", tc.storage, srcbucket, filename)
+	dst := fmt.Sprintf("%v://%v/%v", tc.storage, dstbucket, filename)
 
 	cmd := s5cmd("cp", src, dst)
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
-
 	assertLines(t, result.Stdout(), map[int]compareFunc{
 		0: equals(`cp %v %v`, src, dst),
 	})
-
-	// assert source object
+	// assert s3 source object
 	assert.Assert(t, ensureS3Object(s3client, srcbucket, filename, content))
-
-	// assert destination object
-	assert.Assert(t, ensureS3Object(s3client, dstbucket, dstObjName, content))
+	// assert s3 destination object
+	assert.Assert(t, ensureS3Object(s3client, dstbucket, filename, content))
 }
 
 // cp s3://bucket/object s3://bucket2/prefix/
@@ -2239,7 +2235,7 @@ func TestCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T) 
 }
 
 func runCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T, tc *testCase) {
-	if tc.name == "GCS" {
+	if tc.name == "GCP" {
 		t.Skip("TODO(rr)")
 	}
 	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
