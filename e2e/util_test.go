@@ -440,10 +440,12 @@ func createBucket(t *testing.T, client *s3.S3, bucket string) {
 		ACL:    aws.String(s3.BucketCannedACLPublicRead),
 	}
 
-	_, err := client.CreateBucket(input)
+	t.Log("creating bucket", bucket)
+	output, err := client.CreateBucket(input)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log("bucket created:", *output.Location)
 
 	if !isEndpointFromEnv() {
 		return
