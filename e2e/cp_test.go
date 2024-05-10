@@ -2394,7 +2394,6 @@ func TestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			runTestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t, &tc)
 		})
 	}
@@ -2402,6 +2401,8 @@ func TestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T) {
 
 // cp s3://bucket/* s3://bucket/prefix
 func runTestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T, tc *testCase) {
+	t.Parallel()
+
 	bucket := s3BucketFromTestName(t)
 	s3client, s5cmd := setup(t)
 
@@ -2418,8 +2419,8 @@ func runTestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T, tc *te
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	src := fmt.Sprintf("%v://%v/*", tc.storage, bucket)
-	dst := fmt.Sprintf("%v://%v/dst", tc.storage, bucket)
+	src := fmt.Sprintf("s3://%v/*", bucket)
+	dst := fmt.Sprintf("s3://%v/dst", bucket)
 
 	cmd := s5cmd("cp", src, dst)
 	result := icmd.RunCmd(cmd)
