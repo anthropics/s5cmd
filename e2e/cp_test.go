@@ -4295,7 +4295,6 @@ func runTestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilter(t *testing.T, 
 }
 
 func TestCopyExpectExitCode1OnUnreachableHost(t *testing.T) {
-
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
@@ -4307,15 +4306,11 @@ func TestCopyExpectExitCode1OnUnreachableHost(t *testing.T) {
 
 func runCopyExpectExitCode1OnUnreachableHost(t *testing.T, tc *testCase) {
 	_, s5cmd := setup(t)
-
 	bucket := "example"
 	filename := "file"
-
 	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, ".")
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Expected{ExitCode: 1})
-
 	assertLines(t, result.Stderr(), map[int]compareFunc{
 		0: contains(`ERROR "cp %v://%v/%v .": Get "%v://%v/%v": dial tcp: lookup %v`, tc.storage, bucket, filename, tc.storage, bucket, filename, bucket),
 	})
@@ -4332,31 +4327,38 @@ func TestCopySingleFileToStorageWithNoSuchUploadRetryCount(t *testing.T) {
 }
 
 func runTestCopySingleFileToStorageWithNoSuchUploadRetryCount(t *testing.T, tc *testCase) {
-	_, s5cmd := setup(t)
+	s3client, s5cmd := setup(t)
+
+	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
 
 	const (
-		filename     = "file.txt"
-		content      = "this is a test file"
-		dstfile      = "file-copy.txt"
-		nosuchbucket = "nosuchbucket"
+		filename = "example.txt"
+		content  = "Some example text"
 	)
 
-	file := fs.NewFile(t, filename, fs.WithContent(content))
-	defer file.Remove()
+	workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
+	defer workdir.Remove()
 
-	// copy without parents and expect to fail
-	cmd := s5cmd(
-		"cp",
-		file.Path(),
-		fmt.Sprintf("%v://%v/%v", tc.storage, nosuchbucket, dstfile),
-	)
+	srcpath := workdir.Join(filename)
+	dstpath := fmt.Sprintf("%v://%v/", tc.storage, bucket)
+
+	srcpath = filepath.ToSlash(srcpath)
+	cmd := s5cmd("cp", "--no-such-upload-retry-count", "5", srcpath, dstpath)
 	result := icmd.RunCmd(cmd)
 
-	result.Assert(t, icmd.Expected{ExitCode: 1})
+	result.Assert(t, icmd.Success)
 
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: contains(`ERROR "cp %v %v://%v/%v": upload %v://%v/%v`, file.Path(), tc.storage, nosuchbucket, dstfile, tc.storage, nosuchbucket, dstfile),
-	}, strictLineCheck(false))
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+	})
+
+	// assert local filesystem
+	expected := fs.Expected(t, fs.WithFile(filename, content))
+	assert.Assert(t, fs.Equal(workdir.Path(), expected))
+
+	// assert S3
+	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 }
 
 func TestVersionedDownload(t *testing.T) {
