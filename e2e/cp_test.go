@@ -4085,14 +4085,19 @@ func runTestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T, tc *testCase
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	const fileContent = "content"
+	const (
+		exclude     = "*.txt"
+		fileContent = "content"
+	)
 
 	files := [...]string{
-		"abc.txt",
-		"abc.dat",
-		"aaa.txt",
-		"aaa",
-		"abcd",
+		"abc/file.txt",
+		"abc/file2.txt",
+		"abc/abc/file3.txt",
+		"abcd/main.py",
+		"ab/file.py",
+		"a/helper.c",
+		"abc.pdf",
 	}
 
 	for _, filename := range files {
@@ -4100,25 +4105,24 @@ func runTestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T, tc *testCase
 	}
 
 	srcpath := fmt.Sprintf("%s://%s", tc.storage, bucket)
-
-	cmd := s5cmd("cp", "--exclude", ".txt", srcpath+"/abc*", ".")
+	cmd := s5cmd("cp", "--exclude", exclude, srcpath+"/abc*", ".")
 	result := icmd.RunCmd(cmd)
-
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals("cp %v/abc.dat %s", srcpath, files[1]),
-		1: equals("cp %v/abcd %s", srcpath, files[4]),
+		0: equals("cp %v/abc.pdf %s", srcpath, "abc.pdf"),
+		1: equals("cp %v/abcd/main.py %s", srcpath, "abcd/main.py"),
 	}, sortInput(true))
-
 	// assert s3
 	for _, f := range files {
 		assert.Assert(t, ensureS3Object(s3client, bucket, f, fileContent))
 	}
-
 	expectedFileSystem := []fs.PathOp{
-		fs.WithFile("abc.dat", fileContent),
-		fs.WithFile("abcd", fileContent),
+		fs.WithFile("abc.pdf", fileContent),
+		fs.WithDir(
+			"abcd",
+			fs.WithFile("main.py", fileContent),
+		),
 	}
 	// assert local filesystem
 	expected := fs.Expected(t, expectedFileSystem...)
@@ -4128,7 +4132,6 @@ func runTestCopyS3ObjectsWithPrefixWithExcludeFilters(t *testing.T, tc *testCase
 // cp --exclude "*.gz" dir s3://bucket/
 // cp --exclude "*.gz" dir/ s3://bucket/
 // cp --exclude "*.gz" dir/* s3://bucket/
-
 func TestCopyLocalDirectoryToS3WithExcludeFilters(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
