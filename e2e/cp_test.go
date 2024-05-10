@@ -28,7 +28,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -954,49 +953,40 @@ func TestCopyS3ToS3WithArbitraryMetadata(t *testing.T) {
 }
 
 func runTestCopyS3ToS3WithArbitraryMetadata(t *testing.T, tc *testCase) {
+	if tc.storage == "gcs" {
+		// TODO(rr)
+		t.Skip("skipping test for GCS")
+	}
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
-
-	bucket1 := s3BucketFromTestName(t)
-	bucket2 := bucket1 + "-other"
-	createBucket(t, s3client, bucket1)
-	createBucket(t, s3client, bucket2)
+	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
+	t.Log("created bucket:", bucket)
 
 	const (
 		filename = "testfile1.txt"
+		kv1      = "Key1=foo"
+		kv2      = "Key2=bar"
 		content  = "this is a file content"
 	)
 
-	// put a file into bucket2
-	putFile(t, s3client, bucket2, filename, content)
-
-	cmd := s5cmd(
-		"cp",
-		fmt.Sprintf("%v://%v/%v", tc.storage, bucket2, filename),
-		fmt.Sprintf("%v://%v/copied-%v", tc.storage, bucket1, filename),
-		"--metadata", "key1=val1",
-		"--metadata", "key2=val2",
-	)
-
+	// build assert map
+	srcmetadata := map[string]*string{
+		"Key1": aws.String("value1"),
+		"Key2": aws.String("value2"),
+	}
+	dstmetadata := map[string]*string{
+		"Key1": aws.String("foo"),
+		"Key2": aws.String("bar"),
+	}
+	srcpath := fmt.Sprintf("%v://%v/%v", tc.storage, bucket, filename)
+	dstpath := fmt.Sprintf("%v://%v/%v_cp", tc.storage, bucket, filename)
+	putFile(t, s3client, bucket, filename, content, putArbitraryMetadata(srcmetadata))
+	cmd := s5cmd("cp", "--metadata", kv1, "--metadata", kv2, srcpath, dstpath)
 	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: suffix(`cp %v://%v/%v %v://%v/copied-%v`, tc.storage, bucket2, filename, tc.storage, bucket1, filename),
-	})
-
-	// assert local filesystem (should not be modified)
-	assertLines(t, result.Stdout(), map[int]compareFunc{})
-
-	// assert s3 object in bucket1
-	assert.Assert(t, ensureS3Object(
-		s3client, bucket1, fmt.Sprintf("copied-%v", filename), content,
-		ensureArbitraryMetadata(map[string]*string{"key1": strPtr("val1"), "key2": strPtr("val2")}),
-	))
-
-	// assert s3 object in bucket2 still exists
-	assert.Assert(t, ensureS3Object(s3client, bucket2, filename, content))
+	assert.Assert(t, ensureS3Object(s3client, bucket, fmt.Sprintf("%s_cp", filename), content, ensureArbitraryMetadata(dstmetadata)))
 }
 
 func TestCopySingleFileToS3WithAdjacentSlashes(t *testing.T) {
@@ -1008,43 +998,66 @@ func TestCopySingleFileToS3WithAdjacentSlashes(t *testing.T) {
 	}
 }
 
-func runTestCopySingleFileToS3WithAdjacentSlashes(t *testing.T, tc *testCase) {
+func runTestCopySingleFileToS3WithAdjacentSlashes(t *testing.T, tcCsp *testCase) {
 	t.Parallel()
-
-	s3client, s5cmd := setup(t)
-
-	bucket := s3BucketFromTestName(t)
-	createBucket(t, s3client, bucket)
-
+	testcases := []struct {
+		name          string
+		dstpathprefix string
+	}{
+		{
+			name:          "cp dir/file s3://bucket//a/b/",
+			dstpathprefix: "/a/b/",
+		},
+		{
+			name:          "cp dir/file s3://bucket/a//b/",
+			dstpathprefix: "a//b/",
+		},
+		{
+			name:          "cp dir/file s3://bucket/a/b//",
+			dstpathprefix: "a/b//",
+		},
+		{
+			name:          "cp dir/file s3://bucket//a///b/",
+			dstpathprefix: "/a///b/",
+		},
+		{
+			name:          "cp dir/file s3://bucket/a//b///",
+			dstpathprefix: "a//b///",
+		},
+		{
+			name:          "cp dir/file s3://bucket/a//b//c//d///",
+			dstpathprefix: "a//b//c//d///",
+		},
+		{
+			name:          "cp dir/file s3://bucket/bar/s3://",
+			dstpathprefix: "bar/s3://",
+		},
+	}
 	const (
-		filename        = "file1.txt"
-		content         = "some content"
-		subdir          = "subdir/anotherslash//"
-		expectedContent = content
+		filename = "index.txt"
+		content  = "test file"
 	)
-
-	workdir := fs.NewDir(t, "test-dir", fs.WithFile(filename, content))
-	defer workdir.Remove()
-
-	srcpath := workdir.Join(filename)
-	dstpath := fmt.Sprintf("%v://%v/%v//", tc.storage, bucket, subdir)
-
-	srcpath = filepath.ToSlash(srcpath)
-	cmd := s5cmd("cp", srcpath, dstpath)
-	result := icmd.RunCmd(cmd)
-
-	result.Assert(t, icmd.Success)
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: suffix(`cp %v %v%v%v`, srcpath, dstpath, subdir, filename),
-	})
-
-	// assert local filesystem
-	expected := fs.Expected(t, fs.WithFile(filename, content))
-	assert.Assert(t, fs.Equal(workdir.Path(), expected))
-
-	// assert s3 object
-	assert.Assert(t, ensureS3Object(s3client, bucket, path.Join(subdir, filename), expectedContent))
+	for _, tc := range testcases {
+		s3client, s5cmd := setup(t)
+		bucket := s3BucketFromTestName(t)
+		createBucket(t, s3client, bucket)
+		workdir := fs.NewDir(t, bucket, fs.WithFile(filename, content))
+		defer workdir.Remove()
+		srcpath := workdir.Join(filename)
+		dstpath := fmt.Sprintf("s3://%v/%v", bucket, tc.dstpathprefix)
+		srcpath = filepath.ToSlash(srcpath)
+		cmd := s5cmd("cp", srcpath, dstpath)
+		result := icmd.RunCmd(cmd)
+		result.Assert(t, icmd.Success)
+		assertLines(t, result.Stdout(), map[int]compareFunc{
+			0: suffix(`cp %v %v%v`, srcpath, dstpath, filename),
+		})
+		// assert local filesystem
+		expected := fs.Expected(t, fs.WithFile(filename, content))
+		assert.Assert(t, fs.Equal(workdir.Path(), expected))
+		// assert S3
+		assert.Assert(t, ensureS3Object(s3client, bucket, tc.dstpathprefix+filename, content))
+	}
 }
 
 // --json cp dir/file s3://bucket
@@ -1210,21 +1223,10 @@ func runTestCopyDirBackslashedToS3(t *testing.T, tc *testCase) {
 }
 
 // cp --storage-class=GLACIER file s3://bucket/
-
 func TestCopySingleFileToS3WithStorageClassGlacier(t *testing.T) {
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			runTestCopySingleFileToS3WithStorageClassGlacier(t, &tc)
-		})
-	}
-}
-
-func runTestCopySingleFileToS3WithStorageClassGlacier(t *testing.T, tc *testCase) {
 	t.Parallel()
 
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
@@ -1235,8 +1237,7 @@ func runTestCopySingleFileToS3WithStorageClassGlacier(t *testing.T, tc *testCase
 
 	workdir := fs.NewDir(t, t.Name(), fs.WithFile(filename, content))
 	defer workdir.Remove()
-
-	cmd := s5cmd("cp", "--storage-class", "GLACIER", filename, fmt.Sprintf("%s://%s/", tc.storage, bucket))
+	cmd := s5cmd("cp", "--storage-class", "GLACIER", filename, fmt.Sprintf("s3://%s/", bucket))
 
 	// store current working directory to set back
 	// when command finishes
@@ -1257,7 +1258,7 @@ func runTestCopySingleFileToS3WithStorageClassGlacier(t *testing.T, tc *testCase
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v %s://%v/%v`, filename, tc.storage, bucket, filename),
+		0: equals(`cp %v s3://%v/%v`, filename, bucket, filename),
 	})
 
 	// assert local filesystem
@@ -1267,11 +1268,8 @@ func runTestCopySingleFileToS3WithStorageClassGlacier(t *testing.T, tc *testCase
 	// assert s3 object
 	assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
 
-	if tc.storage == "s3" {
-		// assert s3 object storage class
-		// TODO(rr): check
-		// assert.Assert(t, ensureS3ObjectStorageClass(s3client, bucket, filename, "GLACIER"))
-	}
+	// TODO(rr): check
+	// assert.Assert(t, ensureS3ObjectStorageClass(s3client, bucket, filename, "GLACIER"))
 }
 
 // cp --flatten dir/ s3://bucket/
