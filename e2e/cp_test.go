@@ -25,9 +25,9 @@ package e2e
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -4534,31 +4534,37 @@ func TestUploadingSocketFile(t *testing.T) {
 }
 
 func runUploadingSocketFile(t *testing.T, tc *testCase) {
-	_, s5cmd := setup(t)
-
+	s3client, s5cmd := setup(t)
 	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
 
-	dir, err := ioutil.TempDir("", "s5cmd-test")
+	workdir := fs.NewDir(t, t.Name())
+	defer workdir.Remove()
+
+	sockaddr := workdir.Join("/s5cmd.sock")
+	ln, err := net.Listen("unix", sockaddr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
 
-	socketFile := filepath.Join(dir, "socket.sock")
-
-	mkfifo := exec.Command("mkfifo", socketFile)
-	if err := mkfifo.Run(); err != nil {
-		t.Fatalf("unable to create fifo file: %v", err)
-	}
-
-	cmd := s5cmd("cp", socketFile, tc.storage+"://"+bucket+"/")
-	result := icmd.RunCmd(cmd)
-
-	result.Assert(t, icmd.Expected{ExitCode: 1})
-
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: equals(`ERROR "cp %v %v://%v/socket.sock": "%v" is a named pipe`, socketFile, tc.storage, bucket, socketFile),
+	t.Cleanup(func() {
+		ln.Close()
+		os.Remove(sockaddr)
 	})
+
+	cmd := s5cmd("cp", sockaddr, tc.storage+"://"+bucket+"/")
+	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
+
+	// assert error message
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: contains(`is not a regular file`),
+	})
+
+	// assert logs are empty (no copy)
+	assertLines(t, result.Stdout(), nil)
+
+	// assert exit code
+	result.Assert(t, icmd.Expected{ExitCode: 1})
 }
 
 // cp --include "*.py" s3://bucket/* .
