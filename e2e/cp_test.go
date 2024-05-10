@@ -2395,48 +2395,49 @@ func runTestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T, tc *testCas
 }
 
 // cp s3://bucket/* s3://bucket/prefix
-
 func TestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
-			s3client, s5cmd := setup(t)
-
-			bucket := s3BucketFromTestName(t)
-			createBucket(t, s3client, bucket)
-
-			filesToContent := map[string]string{
-				"testfile1.txt":            "this is a test file 1",
-				"readme.md":                "this is a readme file",
-				"b/filename-with-hypen.gz": "file has hypen in its name",
-				"a/another_test_file.txt":  "yet another txt file. yatf.",
-			}
-
-			for filename, content := range filesToContent {
-				putFile(t, s3client, bucket, filename, content)
-			}
-
-			src := fmt.Sprintf("%s://%v/*", tc.storage, bucket)
-			dst := fmt.Sprintf("%s://%v/dst", tc.storage, bucket)
-
-			cmd := s5cmd("cp", src, dst)
-			result := icmd.RunCmd(cmd)
-
-			result.Assert(t, icmd.Success)
-
-			// expect a failure for copying objects without trailing slash
-			assertLines(t, result.Stderr(), map[int]compareFunc{
-				0: contains(`"/dst" is not a directory`),
-			})
-
-			// assert s3 source objects
-			for filename, content := range filesToContent {
-				assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
-			}
+			runTestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t, &tc)
 		})
 	}
+}
+
+func runTestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T, tc *testCase) {
+	bucket := s3BucketFromTestName(t)
+	s3client, s5cmd := setup(t)
+	createBucket(t, s3client, bucket)
+
+	filesToContent := map[string]string{
+		"testfile1.txt":            "this is a test file 1",
+		"readme.md":                "this is a readme file",
+		"b/filename-with-hypen.gz": "file has hypen in its name",
+		"a/another_test_file.txt":  "yet another txt file. yatf.",
+	}
+
+	for filename, content := range filesToContent {
+		putFile(t, s3client, bucket, filename, content)
+	}
+
+	src := fmt.Sprintf("s3://%v/*", bucket)
+	dst := fmt.Sprintf("s3://%v/dst", bucket)
+
+	cmd := s5cmd("cp", src, dst)
+	result := icmd.RunCmd(cmd)
+
+	result.Assert(t, icmd.Expected{ExitCode: 1})
+
+	assertLines(t, result.Stderr(), map[int]compareFunc{
+		0: equals(`ERROR "cp %v %v": target %q must be a bucket or a prefix`, src, dst, dst),
+	})
+
+	// assert s3 source objects
+	for filename, content := range filesToContent {
+		assert.Assert(t, ensureS3Object(s3client, bucket, filename, content))
+	}
+
 }
 
 // --json cp s3://bucket/* s3://bucket/prefix/
