@@ -2419,8 +2419,8 @@ func runTestCopyMultipleS3ObjectsToS3WithPrefixWithoutSlash(t *testing.T, tc *te
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	src := fmt.Sprintf("s3://%v/*", bucket)
-	dst := fmt.Sprintf("s3://%v/dst", bucket)
+	src := fmt.Sprintf("%v://%v/*", tc.storage, bucket)
+	dst := fmt.Sprintf("%v://%v/dst", tc.storage, bucket)
 
 	cmd := s5cmd("cp", src, dst)
 	result := icmd.RunCmd(cmd)
