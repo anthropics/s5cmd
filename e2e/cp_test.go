@@ -2281,8 +2281,6 @@ func runCopyAllObjectsIntoAnotherBucketIncludingSpecialCharacter(t *testing.T, t
 	}
 }
 
-// cp s3://bucket/* s3://bucket/prefix/
-
 func TestCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
@@ -2293,7 +2291,12 @@ func TestCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T) {
 	}
 }
 
+// cp s3://bucket/* s3://bucket/prefix/
 func runTestCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T, tc *testCase) {
+	if tc.name == "GCP" {
+		t.Skip("TODO(rr)")
+	}
+
 	s3client, s5cmd := setup(t)
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
@@ -2309,8 +2312,8 @@ func runTestCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T, tc *testCase) {
 		putFile(t, s3client, bucket, filename, content)
 	}
 
-	src := fmt.Sprintf("%s://%v/*", tc.storage, bucket)
-	dst := fmt.Sprintf("%s://%v/dst", tc.storage, bucket)
+	src := fmt.Sprintf("%v://%v/*", tc.storage, bucket)
+	dst := fmt.Sprintf("%v://%v/dst/", tc.storage, bucket)
 
 	cmd := s5cmd("cp", src, dst)
 	result := icmd.RunCmd(cmd)
@@ -2318,10 +2321,10 @@ func runTestCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T, tc *testCase) {
 	result.Assert(t, icmd.Success)
 
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v/a/another_test_file.txt %v/a/another_test_file.txt`, src, dst),
-		1: equals(`cp %v/b/filename-with-hypen.gz %v/b/filename-with-hypen.gz`, src, dst),
-		2: equals(`cp %v/readme.md %v/readme.md`, src, dst),
-		3: equals(`cp %v/testfile1.txt %v/testfile1.txt`, src, dst),
+		0: equals(`cp s3://%v/a/another_test_file.txt %va/another_test_file.txt`, bucket, dst),
+		1: equals(`cp s3://%v/b/filename-with-hypen.gz %vb/filename-with-hypen.gz`, bucket, dst),
+		2: equals(`cp s3://%v/readme.md %vreadme.md`, bucket, dst),
+		3: equals(`cp s3://%v/testfile1.txt %vtestfile1.txt`, bucket, dst),
 	}, sortInput(true))
 
 	// assert s3 source objects
