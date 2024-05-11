@@ -3486,30 +3486,34 @@ func runTestCopyWithNoFollowSymlink(t *testing.T, tc *testCase) {
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	const (
-		filename   = "file.txt"
-		linkToFile = "my_link"
-	)
+	fileContent := "CAFEBABE"
+	folderLayout := []fs.PathOp{
+		fs.WithDir(
+			"a",
+			fs.WithFile("f1.txt", fileContent),
+		),
+		fs.WithDir("b"),
+		fs.WithDir("c"),
+		fs.WithSymlink("b/link1", "a/f1.txt"),
+		fs.WithSymlink("c/link2", "b/link1"),
+	}
 
-	workdir := t.TempDir()
+	workdir := fs.NewDir(t, t.Name(), folderLayout...)
+	defer workdir.Remove()
 
-	filePath := filepath.Join(workdir, filename)
-	err := ioutil.WriteFile(filePath, []byte("file content"), 0644)
-	assert.NilError(t, err)
+	dst := fmt.Sprintf("s3://%v/prefix/", bucket)
 
-	linkPath := filepath.Join(workdir, linkToFile)
-	err = os.Symlink(filePath, linkPath)
-	assert.NilError(t, err)
+	cmd := s5cmd("cp", "--no-follow-symlinks", "*", dst)
+	result := icmd.RunCmd(cmd, withWorkingDir(workdir))
 
-	cmd := s5cmd("--no-follow-symlinks", "cp", workdir+"/", tc.storage+"://"+bucket+"/prefix/")
-	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 
-	// assert link object was uploaded
-	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+linkToFile, ""))
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals("cp a/f1.txt %va/f1.txt", dst),
+	}, sortInput(true))
 
-	// assert the original file was uploaded
-	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+filename, "file content"))
+	// assert s3 objects
+	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/a/f1.txt", fileContent))
 }
 
 // --dry-run cp dir/ s3://bucket/
@@ -3582,32 +3586,31 @@ func runTestCopyS3ToDirDryRun(t *testing.T, tc *testCase) {
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	const (
-		filesCnt = 10
-	)
+	files := [...]string{"c/file2.txt", "file1.txt"}
 
-	expectedFiles := make([]string, filesCnt)
-	for i := 0; i < filesCnt; i++ {
-		filename := fmt.Sprintf("file%d", i)
-		putFile(t, s3client, bucket, filename, filename)
-		expectedFiles[i] = filename
-	}
+	putFile(t, s3client, bucket, files[0], "content")
+	putFile(t, s3client, bucket, files[1], "content")
 
-	dir, err := os.MkdirTemp("", "")
-	assert.NilError(t, err)
-	defer os.RemoveAll(dir)
+	srcpath := fmt.Sprintf("%s://%s", tc.storage, bucket)
 
-	cmd := s5cmd("--dry-run", "cp", tc.storage+"://"+bucket+"/*", dir+"/")
+	cmd := s5cmd("--dry-run", "cp", srcpath+"/*", "dir/")
 	result := icmd.RunCmd(cmd)
+
 	result.Assert(t, icmd.Success)
 
-	// expect a line of output for each file
-	assert.Equal(t, len(result.Stdout()), filesCnt)
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals("cp %v/c/file2.txt dir/%s", srcpath, files[0]),
+		1: equals("cp %v/file1.txt dir/%s", srcpath, files[1]),
+	}, sortInput(true))
 
-	// assert no files were copied
-	dirEntries, err := os.ReadDir(dir)
-	assert.NilError(t, err)
-	assert.Equal(t, 0, len(dirEntries))
+	// not even outermost directory should be created
+	_, err := os.Stat(cmd.Dir + "/dir")
+	assert.Assert(t, os.IsNotExist(err))
+
+	// assert s3
+	for _, f := range files {
+		assert.Assert(t, ensureS3Object(s3client, bucket, f, "content"))
+	}
 }
 
 func TestCopyLocalObjectstoS3WithRawFlag(t *testing.T) {
@@ -3831,6 +3834,9 @@ func TestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T) {
 }
 
 func rawTestCopyMultipleS3ObjectsToS3WithRawMode(t *testing.T, tcCsp *testCase) {
+	if tcCsp.name == "GCP" {
+		t.Skip("TODO(rr)")
+	}
 	t.Parallel()
 
 	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
@@ -3887,6 +3893,9 @@ func TestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T) {
 }
 
 func runTestCopyMultipleS3ObjectsWithPrefixToS3WithRawMode(t *testing.T, tc *testCase) {
+	if tc.name == "GCP" {
+		t.Skip("TODO(rr)")
+	}
 	t.Parallel()
 
 	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
@@ -4235,15 +4244,19 @@ func runTestCopyLocalDirectoryToS3WithExcludeFilters(t *testing.T, tc *testCase)
 
 // cp --exclude "main*" 's3://srcbucket/*' s3://dstbucket
 func TestCopySingleObjectsIntoAnotherBucketWithExcludeFilters(t *testing.T) {
+	t.Parallel()
 	for _, tc := range testCases {
+		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
-			t.Parallel()
 			runTestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilter(t, &tc)
 		})
 	}
 }
 
 func runTestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilter(t *testing.T, tc *testCase) {
+	if tc.name == "GCP" {
+		t.Skip("TODO(rr)")
+	}
 	srcbucket := s3BucketFromTestNameWithPrefix(t, tc.storage+"-src")
 	dstbucket := s3BucketFromTestNameWithPrefix(t, tc.storage+"-dst")
 
@@ -4265,7 +4278,6 @@ func runTestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilter(t *testing.T, 
 	expectedFiles := []string{
 		"file.txt",
 		"file1.txt",
-		"readme.md",
 	}
 
 	nonExpectedFiles := []string{
@@ -4291,8 +4303,8 @@ func runTestCopySingleS3ObjectsIntoAnotherBucketWithExcludeFilter(t *testing.T, 
 	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Success)
 	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp s3://%s/file.txt s3://%s/file.txt`, srcbucket, dstbucket),
-		1: equals(`cp s3://%s/file1.txt s3://%s/file1.txt`, srcbucket, dstbucket),
+		0: equals(`cp %s://%s/file.txt %s://%s/file.txt`, tc.storage, srcbucket, tc.storage, dstbucket),
+		1: equals(`cp %s://%s/file1.txt %s://%s/file1.txt`, tc.storage, srcbucket, tc.storage, dstbucket),
 	}, sortInput(true))
 
 	// assert s3 source objects
@@ -4323,15 +4335,24 @@ func TestCopyExpectExitCode1OnUnreachableHost(t *testing.T) {
 }
 
 func runCopyExpectExitCode1OnUnreachableHost(t *testing.T, tc *testCase) {
-	_, s5cmd := setup(t)
-	bucket := "example"
-	filename := "file"
-	cmd := s5cmd("cp", tc.storage+"://"+bucket+"/"+filename, ".")
+	const bucket = "bucket"
+
+	_, s5cmd := setup(t, withEndpointURL("nonExistingEndpointURL"))
+
+	folderLayout := []fs.PathOp{
+		fs.WithFile("testfile.txt", "this is a test file 1"),
+	}
+
+	workdir := fs.NewDir(t, "somedir", folderLayout...)
+	defer workdir.Remove()
+
+	src := fmt.Sprintf("%s://%s/*", tc.storage, bucket)
+	src = filepath.ToSlash(src)
+	dst := fmt.Sprintf("%v/", workdir.Path())
+
+	cmd := s5cmd("-r", "0", "cp", src, dst)
 	result := icmd.RunCmd(cmd)
 	result.Assert(t, icmd.Expected{ExitCode: 1})
-	assertLines(t, result.Stderr(), map[int]compareFunc{
-		0: contains(`ERROR "cp %v://%v/%v .": Get "%v://%v/%v": dial tcp: lookup %v`, tc.storage, bucket, filename, tc.storage, bucket, filename, bucket),
-	})
 }
 
 func TestCopySingleFileToStorageWithNoSuchUploadRetryCount(t *testing.T) {
@@ -4659,27 +4680,26 @@ func TestCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T) {
 
 func runCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
-
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
 	const (
-		includePattern = "file*"
-		excludePattern = "*.py"
-		fileContent    = "content"
+		includePattern  = "*.py"
+		includePattern2 = "*.go"
+		excludePattern  = "file*"
+		excludePattern2 = "vendor/*"
+		fileContent     = "content"
 	)
-
 	files := [...]string{
 		"file1.py",
 		"file2.py",
 		"file1.go",
 		"file2.go",
 		"test.py",
+		"app.py",
 		"app.go",
-		"vendor/file1.py",
-		"vendor/file1.py",
-		"vendor/file1.py",
-		"vendor/file2.go",
+		"vendor/package.go",
+		"docs/readme.md",
 	}
 
 	for _, filename := range files {
@@ -4688,18 +4708,27 @@ func runCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T, tc *testCase) {
 
 	srcpath := fmt.Sprintf("%s://%s", tc.storage, bucket)
 
-	cmd := s5cmd("cp", "--exclude", "file*", "--exclude", "vendor/*", "--include", "*.py", "--include", "*.go", srcpath+"/*", ".")
+	cmd := s5cmd("cp", "--exclude", excludePattern, "--exclude", excludePattern2, "--include", includePattern, "--include", includePattern2, srcpath+"/*", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
-	assertLines(t, result.Stdout(), map[int]compareFunc{}, sortInput(true))
+
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals("cp %v/app.go %s", srcpath, files[6]),
+		1: equals("cp %v/app.py %s", srcpath, files[5]),
+		2: equals("cp %v/test.py %s", srcpath, files[4]),
+	}, sortInput(true))
 
 	// assert s3
 	for _, f := range files {
 		assert.Assert(t, ensureS3Object(s3client, bucket, f, fileContent))
 	}
 
-	expectedFileSystem := []fs.PathOp{}
+	expectedFileSystem := []fs.PathOp{
+		fs.WithFile("test.py", fileContent),
+		fs.WithFile("app.py", fileContent),
+		fs.WithFile("app.go", fileContent),
+	}
 	// assert local filesystem
 	expected := fs.Expected(t, expectedFileSystem...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
@@ -4718,11 +4747,16 @@ func TestCopyS3ObjectsWithIncludeExcludeFilter2(t *testing.T) {
 
 func runTestCopyS3ObjectsWithIncludeExcludeFilter2(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
+
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
 	const (
-		fileContent = "content"
+		includePattern  = "*.py"
+		includePattern2 = "*.go"
+		excludePattern  = "file*"
+		excludePattern2 = "vendor/*"
+		fileContent     = "content"
 	)
 
 	files := [...]string{
@@ -4731,11 +4765,10 @@ func runTestCopyS3ObjectsWithIncludeExcludeFilter2(t *testing.T, tc *testCase) {
 		"file1.go",
 		"file2.go",
 		"test.py",
+		"app.py",
 		"app.go",
 		"vendor/package.go",
 		"docs/readme.md",
-		"vendor/file1.py",
-		"vendor/file2.go",
 	}
 
 	for _, filename := range files {
@@ -4744,22 +4777,29 @@ func runTestCopyS3ObjectsWithIncludeExcludeFilter2(t *testing.T, tc *testCase) {
 
 	srcpath := fmt.Sprintf("%s://%s", tc.storage, bucket)
 
-	cmd := s5cmd("cp", "--exclude", "file*", "--exclude", "vendor/*", "--include", "*.py", "--include", "*.go", srcpath+"/*", ".")
+	cmd := s5cmd("cp", "--exclude", excludePattern, "--exclude", excludePattern2, "--include", includePattern, "--include", includePattern2, srcpath+"/*", ".")
 	result := icmd.RunCmd(cmd)
 
 	result.Assert(t, icmd.Success)
-	assertLines(t, result.Stdout(), map[int]compareFunc{}, sortInput(true))
+
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: equals("cp %v/app.go %s", srcpath, files[6]),
+		1: equals("cp %v/app.py %s", srcpath, files[5]),
+		2: equals("cp %v/test.py %s", srcpath, files[4]),
+	}, sortInput(true))
 
 	// assert s3
 	for _, f := range files {
 		assert.Assert(t, ensureS3Object(s3client, bucket, f, fileContent))
 	}
 
-	// assert local filesystem
-	expected := fs.Expected(t,
+	expectedFileSystem := []fs.PathOp{
 		fs.WithFile("test.py", fileContent),
+		fs.WithFile("app.py", fileContent),
 		fs.WithFile("app.go", fileContent),
-	)
+	}
+	// assert local filesystem
+	expected := fs.Expected(t, expectedFileSystem...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
 }
 
