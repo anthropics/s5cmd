@@ -33,6 +33,7 @@ check: vet staticcheck check-fmt check-codegen
 
 .PHONY: staticcheck
 staticcheck:
+	@go install honnef.co/go/tools/cmd/staticcheck@2023.1.7
 	@staticcheck -checks 'all,-ST1000' ./...
 
 .PHONY: vet
@@ -52,6 +53,7 @@ check-codegen: gogenerate ## Check generated code is up-to-date
 
 .PHONY: gogenerate
 gogenerate:
+	@go install go.uber.org/mock/mockgen@0.4.0
 	@go generate ./...
 
 .PHONY: clean
