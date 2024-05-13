@@ -5,11 +5,12 @@ all: clean build test check
 
 VERSION := `git describe --abbrev=0 --tags || echo "0.0.0"`
 BUILD := `git rev-parse --short HEAD`
-LDFLAGS=-ldflags "-X=github.com/peak/s5cmd/v2/version.Version=$(VERSION) -X=github.com/peak/s5cmd/v2/version.GitCommit=$(BUILD)"
+LDFLAGS=-ldflags "-X=github.com/peak/anthropics/v2/version.GitCommit=$(BUILD)"
 
 .PHONY: build
 build:
-	@go build ${GCFLAGS} ${LDFLAGS} -mod=vendor .
+	@go get ./...
+	@go build ${GCFLAGS} ${LDFLAGS} -mod=mod .
 
 TEST_TYPE:=test_with_race
 ifeq ($(OS),Windows_NT)
