@@ -22,6 +22,7 @@ const (
 
 	// s3Scheme is the schema used on s3 URLs
 	s3Scheme string = "s3://"
+	gsScheme string = "gs://"
 
 	// s3Separator is the path separator for s3 URLs
 	s3Separator string = "/"
@@ -99,8 +100,8 @@ func New(s string, opts ...Option) (*URL, error) {
 		return url, nil
 	}
 
-	if scheme != "s3" {
-		return nil, fmt.Errorf("s3 url should start with %q", s3Scheme)
+	if scheme != "s3" && scheme != "gs" {
+		return nil, fmt.Errorf("url should start with %q or %q", s3Scheme, gsScheme)
 	}
 
 	parts := strings.SplitN(rest, s3Separator, 2)
@@ -121,7 +122,7 @@ func New(s string, opts ...Option) (*URL, error) {
 
 	url := &URL{
 		Type:   remoteObject,
-		Scheme: "s3",
+		Scheme: scheme,
 		Bucket: bucket,
 		Path:   key,
 	}

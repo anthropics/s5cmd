@@ -66,7 +66,7 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, erro
 		Endpoint:               opts.Endpoint,
 		NoVerifySSL:            opts.NoVerifySSL,
 		DryRun:                 opts.DryRun,
-		NoSignRequest:          opts.NoSignRequest,
+		NoSignRequest:          opts.NoSignRequest || opts.AuthGoogleADC,
 		UseListObjectsV1:       opts.UseListObjectsV1,
 		RequestPayer:           opts.RequestPayer,
 		Profile:                opts.Profile,
@@ -74,7 +74,9 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, erro
 		LogLevel:               opts.LogLevel,
 		bucket:                 url.Bucket,
 		region:                 opts.region,
+		AuthGoogleADC:          opts.AuthGoogleADC,
 	}
+
 	return newS3Storage(ctx, newOpts)
 }
 
@@ -100,6 +102,7 @@ type Options struct {
 	CredentialFile         string
 	bucket                 string
 	region                 string
+	AuthGoogleADC          bool
 }
 
 func (o *Options) SetRegion(region string) {

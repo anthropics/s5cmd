@@ -404,9 +404,9 @@ func goBuildS5cmd() func() {
 		 Ref 2: "-buildmode=pie not supported when -race is enabled"
 		 https://cs.opensource.google/go/go/+/master:src/cmd/go/internal/work/init.go;l=245;drc=eaf21256545ae04a35fa070763faa6eb2098591d
 		*/
-		args = []string{"build", "-mod=vendor", "-o", s5cmdPath}
+		args = []string{"build", "-o", s5cmdPath}
 	} else {
-		args = []string{"build", "-mod=vendor", "-race", "-o", s5cmdPath}
+		args = []string{"build", "-race", "-o", s5cmdPath}
 	}
 	cmd := exec.Command("go", args...)
 	cmd.Stderr = os.Stderr
