@@ -24,7 +24,6 @@ package e2e
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -3425,7 +3424,7 @@ func runTestCopyLinkToASingleFileWithFollowSymlinkDisabled(t *testing.T, tc *tes
 	workdir := t.TempDir()
 
 	filePath := filepath.Join(workdir, filename)
-	err := ioutil.WriteFile(filePath, []byte(expectedContent), 0644)
+	err := os.WriteFile(filePath, []byte(expectedContent), 0644)
 	assert.NilError(t, err)
 
 	linkPath := filepath.Join(workdir, linkToFile)
@@ -3462,7 +3461,7 @@ func runTestCopyWithFollowSymlink(t *testing.T, tc *testCase) {
 	workdir := t.TempDir()
 
 	filePath := filepath.Join(workdir, filename)
-	err := ioutil.WriteFile(filePath, []byte(expectedContent), 0644)
+	err := os.WriteFile(filePath, []byte(expectedContent), 0644)
 	assert.NilError(t, err)
 
 	linkPath := filepath.Join(workdir, linkToFile)
