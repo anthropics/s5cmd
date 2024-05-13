@@ -3429,7 +3429,7 @@ func runTestCopyWithFollowSymlink(t *testing.T, tc *testCase) {
 	result.Assert(t, icmd.Success)
 
 	// assert link object was uploaded
-	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+linkToFile, ""))
+	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+linkToFile, expectedContent))
 
 	// assert the original file was uploaded
 	assert.Assert(t, ensureS3Object(s3client, bucket, "prefix/"+filename, expectedContent))
