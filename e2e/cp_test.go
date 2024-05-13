@@ -2180,6 +2180,7 @@ func runFlattenCopySingleObjectIntoAnotherBucket(t *testing.T, tc *testCase) {
 // cp s3://bucket/object s3://bucket2/object
 func TestCopySingleS3ObjectIntoAnotherBucketWithObjName(t *testing.T) {
 	for _, tc := range testCases {
+	    tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			runTestCopySingleS3ObjectIntoAnotherBucketWithObjName(t, &tc)
@@ -3724,6 +3725,7 @@ func runTestCopyLocalObjectstoS3WithRawFlag(t *testing.T, tcCsp *testCase) {
 	}
 
 	for _, tc := range testcases {
+	    tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -4714,6 +4716,7 @@ func runTestCopyS3ObjectsWithIncludeFilter(t *testing.T, tc *testCase) {
 
 func TestCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T) {
 	for _, tc := range testCases {
+	    tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
 			t.Parallel()
 			runCopyS3ObjectsWithIncludeExcludeFilter(t, &tc)
@@ -4781,6 +4784,7 @@ func runCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T, tc *testCase) {
 
 func TestCopyS3ObjectsWithIncludeExcludeFilter2(t *testing.T) {
 	for _, tc := range testCases {
+	    tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
 			t.Parallel()
 			runTestCopyS3ObjectsWithIncludeExcludeFilter2(t, &tc)
