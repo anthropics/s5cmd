@@ -101,7 +101,7 @@ func New(s string, opts ...Option) (*URL, error) {
 	}
 
 	if scheme != "s3" && scheme != "gs" {
-		return nil, fmt.Errorf("s3 url should start with %q or %q", s3Scheme, gsScheme)
+		return nil, fmt.Errorf("url should start with %q or %q", s3Scheme, gsScheme)
 	}
 
 	parts := strings.SplitN(rest, s3Separator, 2)
