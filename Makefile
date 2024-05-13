@@ -22,30 +22,26 @@ test: $(TEST_TYPE)
 
 .PHONY: test_with_race
 test_with_race:
-	@S5CMD_BUILD_BINARY_WITHOUT_RACE_FLAG=0 go test -mod=vendor -count=1 -race ./...
+	@S5CMD_BUILD_BINARY_WITHOUT_RACE_FLAG=0 go test -count=1 -race ./...
 
 .PHONY: test_without_race
 test_without_race:
-	@S5CMD_BUILD_BINARY_WITHOUT_RACE_FLAG=1 go test -mod=vendor -count=1 ./...
+	@S5CMD_BUILD_BINARY_WITHOUT_RACE_FLAG=1 go test -count=1 ./...
 
 .PHONY: check
-check: vet staticcheck unparam check-fmt check-codegen
+check: vet staticcheck check-fmt check-codegen
 
 .PHONY: staticcheck
 staticcheck:
 	@staticcheck -checks 'all,-ST1000' ./...
 
-.PHONY: unparam
-unparam:
-	@unparam ./...
-
 .PHONY: vet
 vet:
-	@go vet -mod=vendor ./...
+	@go vet ./...
 
 .PHONY: check-fmt
 check-fmt:
-	@if [ $$(go fmt -mod=vendor ./...) ]; then\
+	@if [ $$(go fmt ./...) ]; then\
 		echo "Go code is not formatted";\
 		exit 1;\
 	fi
@@ -56,7 +52,7 @@ check-codegen: gogenerate ## Check generated code is up-to-date
 
 .PHONY: gogenerate
 gogenerate:
-	@go generate -mod vendor ./...
+	@go generate ./...
 
 .PHONY: clean
 clean:
