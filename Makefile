@@ -53,7 +53,7 @@ check-codegen: gogenerate ## Check generated code is up-to-date
 
 .PHONY: gogenerate
 gogenerate:
-	@go install go.uber.org/mock/mockgen@0.4.0
+	@go install go.uber.org/mock/mockgen@v0.4.0
 	@go generate ./...
 
 .PHONY: clean
