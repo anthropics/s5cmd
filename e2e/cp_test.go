@@ -1186,11 +1186,6 @@ func runTestCopyDirBackslashedToS3(t *testing.T, tc *testCase) {
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
 
-	const (
-		filename = "file1.txt"
-		content  = "this is a file"
-	)
-
 	folderLayout := []fs.PathOp{
 		fs.WithFile("readme.md", `¯\_(ツ)_/¯`),
 		fs.WithDir(
@@ -2089,46 +2084,7 @@ func runTestCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T, tc *test
 	assert.Assert(t, ensureS3Object(s3client, dstbucket, prefix+filename, content))
 }
 
-func runCopySingleS3ObjectIntoAnotherBucketWithPrefix(t *testing.T, tc *testCase) {
-	t.Parallel()
-
-	srcbucket := s3BucketFromTestNameWithPrefix(t, "src")
-	dstbucket := s3BucketFromTestNameWithPrefix(t, "dst")
-
-	s3client, s5cmd := setup(t)
-
-	createBucket(t, s3client, srcbucket)
-	createBucket(t, s3client, dstbucket)
-
-	const (
-		filename = "testfile1.txt"
-		content  = "this is a file content"
-		prefix   = "prefix/"
-	)
-
-	putFile(t, s3client, srcbucket, filename, content)
-
-	src := fmt.Sprintf("%s://%v/%v", tc.storage, srcbucket, filename)
-	dst := fmt.Sprintf("%s://%v/%v", tc.storage, dstbucket, prefix)
-
-	cmd := s5cmd("cp", src, dst)
-	result := icmd.RunCmd(cmd)
-
-	result.Assert(t, icmd.Success)
-
-	assertLines(t, result.Stdout(), map[int]compareFunc{
-		0: equals(`cp %v %v%v`, src, dst, filename),
-	})
-
-	// assert s3 source object
-	assert.Assert(t, ensureS3Object(s3client, srcbucket, filename, content))
-
-	// assert s3 destination object
-	assert.Assert(t, ensureS3Object(s3client, dstbucket, prefix+filename, content))
-}
-
 // cp --flatten s3://bucket/object s3://bucket2/
-
 func TestFlattenCopySingleS3ObjectIntoAnotherBucket(t *testing.T) {
 	t.Parallel()
 	for _, tc := range testCases {
@@ -2179,7 +2135,7 @@ func runFlattenCopySingleObjectIntoAnotherBucket(t *testing.T, tc *testCase) {
 // cp s3://bucket/object s3://bucket2/object
 func TestCopySingleS3ObjectIntoAnotherBucketWithObjName(t *testing.T) {
 	for _, tc := range testCases {
-	    tc := tc
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			runTestCopySingleS3ObjectIntoAnotherBucketWithObjName(t, &tc)
@@ -2353,7 +2309,7 @@ func runTestFlattenCopyMultipleS3ObjectsToS3WithPrefix(t *testing.T, tc *testCas
 	if tc.name == "GCP" {
 		t.Skip("TODO(rr)")
 	}
-	
+
 	s3client, s5cmd := setup(t)
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
@@ -2523,17 +2479,17 @@ func runTestCopyMultipleS3ObjectsToS3JSON(t *testing.T, tc *testCase) {
 
 // cp -u -s s3://bucket/prefix/* s3://bucket/prefix2/
 
-func TestCopyMultipleS3ObjectsToS3_Issue70(t *testing.T) {
+func TestCopyMultipleS3ObjectsToS3Issue70(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runCopyMultipleS3ObjectsToS3_Issue70(t, &tc)
+			runCopyMultipleS3ObjectsToS3Issue70(t, &tc)
 		})
 	}
 }
 
-func runCopyMultipleS3ObjectsToS3_Issue70(t *testing.T, tc *testCase) {
+func runCopyMultipleS3ObjectsToS3Issue70(t *testing.T, tc *testCase) {
 	if tc.name == "GCP" {
 		t.Skip("TODO(rr)")
 	}
@@ -2797,17 +2753,17 @@ func runTestCopyS3ToLocalWithSameFilenameDontOverrideIfS3ObjectIsOlder(t *testin
 
 // cp -u -s s3://bucket/prefix/* dir/
 
-func TestCopyS3ToLocal_Issue70(t *testing.T) {
+func TestCopyS3ToLocalIssue70(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runTestCopyS3ToLocal_Issue70(t, &tc)
+			runTestCopyS3ToLocalIssue70(t, &tc)
 		})
 	}
 }
 
-func runTestCopyS3ToLocal_Issue70(t *testing.T, tc *testCase) {
+func runTestCopyS3ToLocalIssue70(t *testing.T, tc *testCase) {
 	s3client, s5cmd := setup(t)
 	bucket := s3BucketFromTestName(t)
 	createBucket(t, s3client, bucket)
@@ -3724,7 +3680,7 @@ func runTestCopyLocalObjectstoS3WithRawFlag(t *testing.T, tcCsp *testCase) {
 	}
 
 	for _, tc := range testcases {
-	    tc := tc
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -4715,7 +4671,7 @@ func runTestCopyS3ObjectsWithIncludeFilter(t *testing.T, tc *testCase) {
 
 func TestCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T) {
 	for _, tc := range testCases {
-	    tc := tc
+		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
 			t.Parallel()
 			runCopyS3ObjectsWithIncludeExcludeFilter(t, &tc)
@@ -4783,7 +4739,7 @@ func runCopyS3ObjectsWithIncludeExcludeFilter(t *testing.T, tc *testCase) {
 
 func TestCopyS3ObjectsWithIncludeExcludeFilter2(t *testing.T) {
 	for _, tc := range testCases {
-	    tc := tc
+		tc := tc
 		t.Run(tc.storage, func(t *testing.T) {
 			t.Parallel()
 			runTestCopyS3ObjectsWithIncludeExcludeFilter2(t, &tc)
@@ -4847,8 +4803,4 @@ func runTestCopyS3ObjectsWithIncludeExcludeFilter2(t *testing.T, tc *testCase) {
 	// assert local filesystem
 	expected := fs.Expected(t, expectedFileSystem...)
 	assert.Assert(t, fs.Equal(cmd.Dir, expected))
-}
-
-func strPtr(s string) *string {
-	return &s
 }
