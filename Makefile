@@ -5,7 +5,7 @@ all: clean build test check
 
 VERSION := `git describe --abbrev=0 --tags || echo "0.0.0"`
 BUILD := `git rev-parse --short HEAD`
-LDFLAGS=-ldflags "-X=github.com/peak/anthropics/v2/version.GitCommit=$(BUILD)"
+LDFLAGS=-ldflags "-X=github.com//anthropics/s5cmd/v2/version.GitCommit=$(BUILD)"
 
 .PHONY: build
 build:
