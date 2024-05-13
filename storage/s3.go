@@ -1199,7 +1199,7 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 
 	// Create a token source that reuses the token from the default credentials, caches responses, and refreshes the token as needed
 	tokenSource := oauth2.ReuseTokenSource(nil, creds.TokenSource)
-	var transport = baseClient.Transport
+	transport := baseClient.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
