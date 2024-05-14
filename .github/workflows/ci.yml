@@ -16,7 +16,6 @@ jobs:
         os:
           - macos
           - ubuntu
-          - windows
 
     name: build (${{ matrix.os }}/go-${{ matrix.go-version }})
     runs-on: ${{ matrix.os }}-latest
