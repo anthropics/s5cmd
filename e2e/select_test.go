@@ -557,7 +557,7 @@ func TestSelectWithParquet(t *testing.T) {
 	}
 }
 
-func genTestData(t *testing.T, rowcount int, informat, outformat, structure string, where bool) (string, string) {
+func genTestData(t *testing.T, rowcount int, informat, outformat, structure string, _ bool) (string, string) {
 	t.Helper()
 
 	type row struct {

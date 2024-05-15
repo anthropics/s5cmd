@@ -1,7 +1,27 @@
-[![Go Report](https://goreportcard.com/badge/github.com/peak/s5cmd/v2)](https://goreportcard.com/report/github.com/peak/s5cmd/v2) ![Github Actions Status](https://github.com/peak/s5cmd/actions/workflows/ci.yml/badge.svg)
+# anthropic s5cmd fork
 
-![](./doc/s5cmd_header.jpg)
+We have forked s5cmd in order to add GCS and WIF support so that we can continue
+to use this tool without the need for long-lived credentials, i.e. HMAC keys.
 
+There are minor differences in the implementation from the original. See [this
+PR](https://github.com/anthropics/s5cmd/pull/5) for the motivating changes.
+
+## Development Guide
+
+This project largely uses the standard go tooling.
+
+Run tests with `make test` (basically just `go test ./...`).
+
+Benchmark two versions of s5cmd with:
+```bash
+# bucket in seceng playground account, us-east-1
+BUCKET_NO_S3_PREFIX="serum-intake-waiver-espalier" \
+    OLD="HEAD~1" \
+    NEW="HEAD" \
+    python ./benchmark/bench.py -b $BUCKET_NO_S3_PREFIX -s $OLD $NEW -hf ' --show-output'
+```
+
+# OLD README FOLLOWS
 
 ## Overview
 `s5cmd` is a very fast S3 and local filesystem execution tool. It comes with support
