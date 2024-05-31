@@ -1198,7 +1198,8 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 	}
 
 	// Create a token source that reuses the token from the default credentials, caches responses, and refreshes the token as needed
-	tokenSource := oauth2.ReuseTokenSource(nil, creds.TokenSource)
+	// The token source will refresh the token if it expires in less than 5 minutes to account for any delays in requests
+	tokenSource := oauth2.ReuseTokenSourceWithExpiry(nil, creds.TokenSource, time.Minute*5)
 	transport := baseClient.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
