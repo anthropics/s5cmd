@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	url "github.com/peak/s5cmd/v2/storage/url"
+	url "github.com/anthropics/s5cmd/v2/storage/url"
 	gomock "go.uber.org/mock/gomock"
 )
 

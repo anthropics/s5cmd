@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/peak/s5cmd/v2/storage"
-	"github.com/peak/s5cmd/v2/strutil"
+	"github.com/anthropics/s5cmd/v2/storage"
+	"github.com/anthropics/s5cmd/v2/strutil"
 )
 
 // createRegexFromWildcard creates regex strings from wildcard.

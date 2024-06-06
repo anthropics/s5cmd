@@ -1,8 +1,8 @@
 package command
 
 import (
-	errorpkg "github.com/peak/s5cmd/v2/error"
-	"github.com/peak/s5cmd/v2/storage"
+	errorpkg "github.com/anthropics/s5cmd/v2/error"
+	"github.com/anthropics/s5cmd/v2/storage"
 )
 
 // SyncStrategy is the interface to make decision whether given source object should be synced

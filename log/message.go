@@ -3,8 +3,8 @@ package log
 import (
 	"fmt"
 
-	"github.com/peak/s5cmd/v2/storage/url"
-	"github.com/peak/s5cmd/v2/strutil"
+	"github.com/anthropics/s5cmd/v2/storage/url"
+	"github.com/anthropics/s5cmd/v2/strutil"
 )
 
 // Message is an interface to print structured logs.

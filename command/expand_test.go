@@ -11,8 +11,8 @@ import (
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/fs"
 
-	"github.com/peak/s5cmd/v2/storage"
-	"github.com/peak/s5cmd/v2/storage/url"
+	"github.com/anthropics/s5cmd/v2/storage"
+	"github.com/anthropics/s5cmd/v2/storage/url"
 )
 
 func TestExpandSources(t *testing.T) {
