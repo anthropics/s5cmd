@@ -7,10 +7,10 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/peak/s5cmd/v2/log"
-	"github.com/peak/s5cmd/v2/storage"
-	"github.com/peak/s5cmd/v2/storage/url"
-	"github.com/peak/s5cmd/v2/strutil"
+	"github.com/anthropics/s5cmd/v2/log"
+	"github.com/anthropics/s5cmd/v2/storage"
+	"github.com/anthropics/s5cmd/v2/storage/url"
+	"github.com/anthropics/s5cmd/v2/strutil"
 )
 
 var bucketVersionHelpTemplate = `Name:

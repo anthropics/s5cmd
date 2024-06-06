@@ -5,7 +5,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/peak/s5cmd/v2/version"
+	"github.com/anthropics/s5cmd/v2/version"
 )
 
 func NewVersionCommand() *cli.Command {
