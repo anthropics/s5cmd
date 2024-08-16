@@ -31,6 +31,8 @@ import (
 
 	"github.com/peak/s5cmd/v2/log"
 	"github.com/peak/s5cmd/v2/storage/url"
+	"golang.org/x/oauth2"
+	"path/filepath"
 )
 
 func TestS3ImplementsStorageInterface(t *testing.T) {
@@ -1255,6 +1257,89 @@ func TestAWSLogLevel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFileCachedTokenSource(t *testing.T) {
+	log.Init("debug", false)
+	// Setup a temporary directory for the cache file
+	tempDir, err := os.MkdirTemp("", "token-cache-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cacheFile := filepath.Join(tempDir, "token-cache.json")
+
+	// Create a mock underlying token source
+	mockSource := &mockTokenSource{
+		token: &oauth2.Token{
+			AccessToken: "mock-token",
+			TokenType:   "Bearer",
+			Expiry:      time.Now().Add(1 * time.Hour),
+		},
+	}
+
+	cachedSource := &FileCachedTokenSource{
+		underlying: mockSource,
+		cacheFile:  cacheFile,
+	}
+
+	t.Run("Read from empty cache", func(t *testing.T) {
+		token, err := cachedSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+		if token.AccessToken != "mock-token" {
+			t.Errorf("Expected mock-token, got %s", token.AccessToken)
+		}
+	})
+
+	t.Run("Write and read from cache", func(t *testing.T) {
+		// First call should write to cache
+		_, err := cachedSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+
+		// Change the mock token
+		mockSource.token.AccessToken = "new-mock-token"
+
+		// Second call should read from cache
+		token, err := cachedSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+		if token.AccessToken != "mock-token" {
+			t.Errorf("Expected cached mock-token, got %s", token.AccessToken)
+		}
+	})
+
+	t.Run("Expired token in cache", func(t *testing.T) {
+		expiredToken := &oauth2.Token{
+			AccessToken: "expired-token",
+			TokenType:   "Bearer",
+			Expiry:      time.Now().Add(-1 * time.Hour),
+		}
+		if err := cachedSource.writeTokenToCache(expiredToken); err != nil {
+			t.Fatalf("Failed to write expired token: %v", err)
+		}
+
+		token, err := cachedSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+		if token.AccessToken != "new-mock-token" {
+			t.Errorf("Expected new-mock-token, got %s", token.AccessToken)
+		}
+	})
+}
+
+type mockTokenSource struct {
+	token *oauth2.Token
+}
+
+func (m *mockTokenSource) Token() (*oauth2.Token, error) {
+	return m.token, nil
 }
 
 func valueAtPath(i interface{}, s string) interface{} {
