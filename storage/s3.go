@@ -1181,9 +1181,15 @@ type SessionCache struct {
 	sessions map[Options]*session.Session
 }
 
+type CachedTokenInfo struct {
+	Token    *oauth2.Token `json:"token"`
+	Audience string        `json:"audience"`
+}
+
 type FileCachedTokenSource struct {
 	underlying oauth2.TokenSource
 	cacheFile  string
+	audience   string
 }
 
 // readTokenFromCache attempts to read and parse an OAuth2 token from the cache file.
@@ -1194,7 +1200,7 @@ type FileCachedTokenSource struct {
 // Returns:
 //   - *oauth2.Token: The parsed OAuth2 token if successful
 //   - error: An error if reading or parsing the cache file fails
-func (c *FileCachedTokenSource) readTokenFromCache() (*oauth2.Token, error) {
+func (c *FileCachedTokenSource) readTokenFromCache() (*CachedTokenInfo, error) {
 	msg := log.DebugMessage{
 		Operation: "FileCachedTokenSource.readTokenFromCache",
 		Err:       fmt.Sprintf("reading token from cache file %v", c.cacheFile),
@@ -1206,12 +1212,12 @@ func (c *FileCachedTokenSource) readTokenFromCache() (*oauth2.Token, error) {
 		return nil, fmt.Errorf("failed to read cached token: %v", err)
 	}
 
-	var token oauth2.Token
-	if err := json.Unmarshal(data, &token); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal cached token: %v", err)
+	var cachedInfo CachedTokenInfo
+	if err := json.Unmarshal(data, &cachedInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal cached token info: %v", err)
 	}
 
-	return &token, nil
+	return &cachedInfo, nil
 }
 
 // writeTokenToCache marshals the given OAuth2 token to JSON and writes it to the cache file.
@@ -1231,7 +1237,12 @@ func (c *FileCachedTokenSource) writeTokenToCache(token *oauth2.Token) error {
 		Err:       fmt.Sprintf("writing token to cache file %v", c.cacheFile),
 	}
 	log.Debug(msg)
-	data, err := json.Marshal(token)
+	cachedInfo := CachedTokenInfo{
+		Token:    token,
+		Audience: c.audience,
+	}
+
+	data, err := json.Marshal(cachedInfo)
 	if err != nil {
 		return fmt.Errorf("failed to marshal token: %v", err)
 	}
@@ -1259,22 +1270,26 @@ func (c *FileCachedTokenSource) writeTokenToCache(token *oauth2.Token) error {
 //   - *oauth2.Token: The valid OAuth2 token
 //   - error: An error if token retrieval or caching fails
 func (c *FileCachedTokenSource) Token() (*oauth2.Token, error) {
-	// Try to read from cache first
-	token, err := c.readTokenFromCache()
-	// Refresh the token if it expires in less than 5 minutes to account for any delays in requests
-	if err == nil && token.Valid() && time.Until(token.Expiry) > 5*time.Minute {
-		return token, nil
-	} else if err != nil {
+	cachedInfo, err := c.readTokenFromCache()
+	if err != nil {
 		// Log the error but don't fail
 		msg := log.ErrorMessage{
 			Command: "FileCachedTokenSource.Token",
 			Err:     fmt.Errorf("Failed to read token from cache: %v\n", err).Error(),
 		}
 		log.Error(msg)
+	} else if cachedInfo.Audience != c.audience {
+		msg := log.DebugMessage{
+			Command: "FileCachedTokenSource.Token",
+			Err:     fmt.Sprintf("Failed to read token from cache: audience mismatch\nCurrent audience: %v\nNew audience: %v", cachedInfo.Audience, c.audience),
+		}
+		log.Debug(msg)
+	} else if cachedInfo.Token.Valid() && time.Until(cachedInfo.Token.Expiry) > 5*time.Minute {
+		return cachedInfo.Token, nil
 	}
 
 	// If cache read fails or token is invalid, get a new token
-	token, err = c.underlying.Token()
+	token, err := c.underlying.Token()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get token from underlying source: %v", err)
 	}
@@ -1314,16 +1329,32 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 		log.Error(msg)
 		return nil, err
 	}
-
 	// Underlying token store uses ADC loaded creds. This is what actually talks to the WIF token exchange endpoint for e.g.
 	tokenSource := creds.TokenSource
+
+	// If this is WIF auth, then wrap that in a file cached token source, which will cache the token
+	// in a file and only request a new token if the cached token is invalid. This reduces calls to
+	// WIF token exchange endpoints, reducing risk of rate limiting.
 	if os.Getenv("S5CMD_FILE_CACHING_OPT_OUT") == "" {
-		// We then wrap that in a file cached token source, which will cache the token in a file
-		// and only request a new token if the cached token is invalid. This reduces calls to
-		// WIF token exchange endpoints, reducing risk of rate limiting.
-		tokenSource = &FileCachedTokenSource{
-			underlying: tokenSource,
-			cacheFile:  filepath.Join(os.Getenv("HOME"), ".cache", "coo", "cached_wif_s5cmd.json"),
+		// Determine if this is WIF auth, and if so use file caching
+		content := map[string]interface{}{}
+		json.Unmarshal(creds.JSON, &content)
+		for key, value := range content {
+			fmt.Printf("%s: %v\n", key, value)
+		}
+		audience := content["audience"]
+		if audience != nil {
+			tokenSource = &FileCachedTokenSource{
+				underlying: tokenSource,
+				cacheFile:  filepath.Join(os.Getenv("HOME"), ".cache", "coo", "cached_s5cmd.json"),
+				audience:   audience.(string),
+			}
+		} else {
+			msg := log.DebugMessage{
+				Operation: "s3.newGoogleAuthenticationClient",
+				Err:       fmt.Sprintf("No audience in creds, assuming no WIF token exchange endpoint and skipping cached auth"),
+			}
+			log.Debug(msg)
 		}
 	}
 

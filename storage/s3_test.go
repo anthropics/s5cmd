@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1330,6 +1331,110 @@ func TestFileCachedTokenSource(t *testing.T) {
 		}
 		if token.AccessToken != "new-mock-token" {
 			t.Errorf("Expected new-mock-token, got %s", token.AccessToken)
+		}
+	})
+}
+
+func TestFileCachedTokenSourceWithAudience(t *testing.T) {
+	log.Init("debug", false)
+	tempDir, err := os.MkdirTemp("", "token-cache-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cacheFile := filepath.Join(tempDir, "token-cache.json")
+
+	mockSource := &mockTokenSource{
+		token: &oauth2.Token{
+			AccessToken: "mock-token",
+			TokenType:   "Bearer",
+			Expiry:      time.Now().Add(1 * time.Hour),
+		},
+	}
+
+	t.Run("Audience mismatch", func(t *testing.T) {
+		cachedSource := &FileCachedTokenSource{
+			underlying: mockSource,
+			cacheFile:  cacheFile,
+			audience:   "audience1",
+		}
+
+		// Write a token with a different audience
+		err := cachedSource.writeTokenToCache(&oauth2.Token{
+			AccessToken: "old-token",
+			TokenType:   "Bearer",
+			Expiry:      time.Now().Add(1 * time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("Failed to write token: %v", err)
+		}
+
+		// Change the audience
+		cachedSource.audience = "audience2"
+
+		token, err := cachedSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+		if token.AccessToken != "mock-token" {
+			t.Errorf("Expected new mock-token due to audience mismatch, got %s", token.AccessToken)
+		}
+	})
+
+	t.Run("Matching audience", func(t *testing.T) {
+		cachedSource := &FileCachedTokenSource{
+			underlying: mockSource,
+			cacheFile:  cacheFile,
+			audience:   "audience1",
+		}
+
+		// Write a token
+		_, err := cachedSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get and cache token: %v", err)
+		}
+
+		// Change the mock token
+		mockSource.token.AccessToken = "new-mock-token"
+
+		// Get the token again, should use cache
+		token, err := cachedSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+		if token.AccessToken != "mock-token" {
+			t.Errorf("Expected cached mock-token, got %s", token.AccessToken)
+		}
+	})
+
+	t.Run("Write and read audience", func(t *testing.T) {
+		cachedSource := &FileCachedTokenSource{
+			underlying: mockSource,
+			cacheFile:  cacheFile,
+			audience:   "test-audience",
+		}
+
+		// Write a token
+		_, err := cachedSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get and cache token: %v", err)
+		}
+
+		// Read the cache file
+		data, err := os.ReadFile(cacheFile)
+		if err != nil {
+			t.Fatalf("Failed to read cache file: %v", err)
+		}
+
+		var cachedInfo CachedTokenInfo
+		err = json.Unmarshal(data, &cachedInfo)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal cache data: %v", err)
+		}
+
+		if cachedInfo.Audience != "test-audience" {
+			t.Errorf("Expected audience 'test-audience', got '%s'", cachedInfo.Audience)
 		}
 	})
 }
