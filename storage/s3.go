@@ -1305,7 +1305,6 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 	if baseClient == nil {
 		baseClient = http.DefaultClient
 	}
-	// Underlying token store uses ADC loaded creds. This is what actually talks to the WIF token exchange endpoint for e.g.
 	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
 		msg := log.ErrorMessage{
@@ -1315,17 +1314,22 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 		log.Error(msg)
 		return nil, err
 	}
-	// We then wrap that in a file cached token source, which will cache the token in a file
-	// and only request a new token if the cached token is invalid. This reduces calls to
-	// WIF token exchange endpoints, reducing risk of rate limiting.
-	fileCachedTokenSource := &FileCachedTokenSource{
-		underlying: creds.TokenSource,
-		cacheFile:  filepath.Join(os.Getenv("HOME"), ".cache", "coo", "cached_wif_s5cmd.json"),
+
+	// Underlying token store uses ADC loaded creds. This is what actually talks to the WIF token exchange endpoint for e.g.
+	tokenSource := creds.TokenSource
+	if os.Getenv("S5CMD_FILE_CACHING_OPT_OUT") == "" {
+		// We then wrap that in a file cached token source, which will cache the token in a file
+		// and only request a new token if the cached token is invalid. This reduces calls to
+		// WIF token exchange endpoints, reducing risk of rate limiting.
+		tokenSource = &FileCachedTokenSource{
+			underlying: tokenSource,
+			cacheFile:  filepath.Join(os.Getenv("HOME"), ".cache", "coo", "cached_wif_s5cmd.json"),
+		}
 	}
 
 	// Finally, we wrap the file cached token source in an memory cache, reducing the
 	// number of calls to the file system, and which handles refreshing when needed.
-	tokenSource := oauth2.ReuseTokenSource(nil, fileCachedTokenSource)
+	tokenSource = oauth2.ReuseTokenSource(nil, tokenSource)
 
 	transport := baseClient.Transport
 	if transport == nil {
