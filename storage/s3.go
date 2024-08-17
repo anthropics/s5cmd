@@ -1275,13 +1275,13 @@ func (c *FileCachedTokenSource) Token() (*oauth2.Token, error) {
 		// Log the error but don't fail
 		msg := log.ErrorMessage{
 			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Errorf("Failed to read token from cache: %v\n", err).Error(),
+			Err:     fmt.Errorf("failed to read token from cache: %v", err).Error(),
 		}
 		log.Error(msg)
 	} else if cachedInfo.Audience != c.audience {
 		msg := log.DebugMessage{
 			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Sprintf("Failed to read token from cache: audience mismatch\nCurrent audience: %v\nNew audience: %v", cachedInfo.Audience, c.audience),
+			Err:     fmt.Sprintf("failed to read token from cache: audience mismatch\nCurrent audience: %v\nNew audience: %v", cachedInfo.Audience, c.audience),
 		}
 		log.Debug(msg)
 	} else if cachedInfo.Token.Valid() && time.Until(cachedInfo.Token.Expiry) > 5*time.Minute {
@@ -1299,7 +1299,7 @@ func (c *FileCachedTokenSource) Token() (*oauth2.Token, error) {
 		// Log the error but don't fail
 		msg := log.ErrorMessage{
 			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Errorf("Failed to cache token: %v\n", err).Error(),
+			Err:     fmt.Errorf("failed to cache token: %v", err).Error(),
 		}
 		log.Error(msg)
 	}
@@ -1352,7 +1352,7 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 		} else {
 			msg := log.DebugMessage{
 				Operation: "s3.newGoogleAuthenticationClient",
-				Err:       fmt.Sprintf("No audience in creds, assuming no WIF token exchange endpoint and skipping cached auth"),
+				Err:       "No audience in creds, assuming no WIF token exchange endpoint and skipping cached auth",
 			}
 			log.Debug(msg)
 		}
