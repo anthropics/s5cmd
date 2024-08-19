@@ -2,8 +2,7 @@ before:
   hooks:
     - make build
 builds:
-  -
-    binary: s5cmd
+  - binary: s5cmd
     ldflags: -s -w -X github.com/peak/s5cmd/v2/version.Version={{.Tag}} -X github.com/peak/s5cmd/v2/version.GitCommit={{ .ShortCommit }}
     env:
       - CGO_ENABLED=0
@@ -15,10 +14,10 @@ builds:
       - arm64
 
 archives:
-  - name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
 
 checksum:
-  name_template: '{{ .ProjectName }}_checksums.txt'
+  name_template: "{{ .ProjectName }}_checksums.txt"
 
 snapshot:
   name_template: "{{ .Tag }}"
@@ -27,16 +26,16 @@ changelog:
   sort: asc
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
+      - "^docs:"
+      - "^test:"
       - Merge pull request
       - Merge branch
 
 brews:
-  - tap:
+  - repository:
       owner: peak
       name: homebrew-tap
-    folder: Formula
+    directory: Formula
     name: s5cmd
     description: Parallel S3 and local filesystem execution tool
     homepage: https://github.com/peak/s5cmd
@@ -45,8 +44,7 @@ brews:
       system "#{bin}/s5cmd version"
 
 nfpms:
-  -
-    vendor: Peak
+  - vendor: Peak
     homepage: https://github.com/peak/s5cmd
     license: MIT
     maintainer: Peak <packaging@peak.com>
