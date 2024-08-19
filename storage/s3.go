@@ -1360,7 +1360,7 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 
 	// Finally, we wrap the file cached token source in an memory cache, reducing the
 	// number of calls to the file system, and which handles refreshing when needed.
-	tokenSource = oauth2.ReuseTokenSource(nil, tokenSource)
+	tokenSource = oauth2.ReuseTokenSourceWithExpiry(nil, creds.TokenSource, time.Minute*5)
 
 	transport := baseClient.Transport
 	if transport == nil {
