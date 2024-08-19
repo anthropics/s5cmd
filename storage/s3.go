@@ -1284,7 +1284,7 @@ func (c *FileCachedTokenSource) Token() (*oauth2.Token, error) {
 			Err:     fmt.Sprintf("failed to read token from cache: audience mismatch\nCurrent audience: %v\nNew audience: %v", cachedInfo.Audience, c.audience),
 		}
 		log.Debug(msg)
-	} else if cachedInfo.Token.Valid() && time.Until(cachedInfo.Token.Expiry) > 5*time.Minute {
+	} else if cachedInfo.Token.Valid() && time.Until(cachedInfo.Token.Expiry) >= 5*time.Minute {
 		return cachedInfo.Token, nil
 	}
 
