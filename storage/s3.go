@@ -1338,6 +1338,7 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 	if os.Getenv("S5CMD_FILE_CACHING_OPT_OUT") == "" {
 		// Determine if this is WIF auth, and if so use file caching
 		content := map[string]interface{}{}
+		json.Unmarshal(creds.JSON, &content)
 		audience := content["audience"]
 		if audience != nil {
 			tokenSource = &FileCachedTokenSource{
