@@ -1339,9 +1339,6 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 		// Determine if this is WIF auth, and if so use file caching
 		content := map[string]interface{}{}
 		json.Unmarshal(creds.JSON, &content)
-		for key, value := range content {
-			fmt.Printf("%s: %v\n", key, value)
-		}
 		audience := content["audience"]
 		if audience != nil {
 			tokenSource = &FileCachedTokenSource{
