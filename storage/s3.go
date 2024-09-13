@@ -1192,6 +1192,16 @@ type FileCachedTokenSource struct {
 	audience   string
 }
 
+// ensureDirectoryExists creates the directory path for the cache file if it doesn't exist.
+// It uses os.MkdirAll to create all necessary parent directories with permissions set to 0700 (rwx------).
+//
+// Returns:
+//   - error: An error if the directory creation fails, or nil if successful.
+func (c *FileCachedTokenSource) ensureDirectoryExists() error {
+	dir := filepath.Dir(c.cacheFile)
+	return os.MkdirAll(dir, 0700)
+}
+
 // readTokenFromCache attempts to read and parse an OAuth2 token from the cache file.
 //
 // This function uses lockedfile.Read to safely read the contents of the cache file,
@@ -1206,6 +1216,10 @@ func (c *FileCachedTokenSource) readTokenFromCache() (*CachedTokenInfo, error) {
 		Err:       fmt.Sprintf("reading token from cache file %v", c.cacheFile),
 	}
 	log.Debug(msg)
+
+	if err := c.ensureDirectoryExists(); err != nil {
+		return nil, fmt.Errorf("failed to create cache directory: %v", err)
+	}
 
 	data, err := lockedfile.Read(c.cacheFile)
 	if err != nil {
@@ -1237,6 +1251,11 @@ func (c *FileCachedTokenSource) writeTokenToCache(token *oauth2.Token) error {
 		Err:       fmt.Sprintf("writing token to cache file %v", c.cacheFile),
 	}
 	log.Debug(msg)
+
+	if err := c.ensureDirectoryExists(); err != nil {
+		return fmt.Errorf("failed to create cache directory: %v", err)
+	}
+
 	cachedInfo := CachedTokenInfo{
 		Token:    token,
 		Audience: c.audience,
@@ -1286,6 +1305,12 @@ func (c *FileCachedTokenSource) Token() (*oauth2.Token, error) {
 		log.Debug(msg)
 	} else if cachedInfo.Token.Valid() && time.Until(cachedInfo.Token.Expiry) >= 5*time.Minute {
 		return cachedInfo.Token, nil
+	} else {
+		msg := log.DebugMessage{
+			Command: "FileCachedTokenSource.Token",
+			Err:     fmt.Sprintf("cached token not usable: \nValid: %v\ntime until expiry: %v", cachedInfo.Token.Valid(), time.Until(cachedInfo.Token.Expiry)),
+		}
+		log.Debug(msg)
 	}
 
 	// If cache read fails or token is invalid, get a new token
@@ -1305,6 +1330,49 @@ func (c *FileCachedTokenSource) Token() (*oauth2.Token, error) {
 	}
 
 	return token, nil
+}
+
+// createTokenSource creates an OAuth2 token source from the given Google credentials.
+// It wraps the token source with caching mechanisms to improve performance and reduce
+// the risk of rate limiting.
+//
+// Parameters:
+//   - creds: Google credentials used to create the base token source.
+//   - cacheFilePath: Path to the file where tokens will be cached.
+//
+// Returns:
+//   - oauth2.TokenSource: A token source that incorporates caching mechanisms.
+//   - error: An error if token source creation fails.
+func createTokenSource(creds *google.Credentials, cacheFilePath string) (oauth2.TokenSource, error) {
+	// Underlying token store uses ADC loaded creds. This is what actually talks to the WIF token exchange endpoint for e.g.
+	tokenSource := creds.TokenSource
+
+	// If this is WIF auth, then wrap that in a file cached token source, which will cache the token
+	// in a file and only request a new token if the cached token is invalid. This reduces calls to
+	// WIF token exchange endpoints, reducing risk of rate limiting.
+	if os.Getenv("S5CMD_FILE_CACHING_OPT_OUT") == "" {
+		// Determine if this is WIF auth, and if so use file caching
+		content := map[string]interface{}{}
+		json.Unmarshal(creds.JSON, &content)
+		audience := content["audience"]
+		if audience != nil {
+			tokenSource = &FileCachedTokenSource{
+				underlying: tokenSource,
+				cacheFile:  cacheFilePath,
+				audience:   audience.(string),
+			}
+		} else {
+			msg := log.DebugMessage{
+				Operation: "s3.newGoogleAuthenticationClient",
+				Err:       "No audience in creds, assuming no WIF token exchange endpoint and skipping cached auth",
+			}
+			log.Debug(msg)
+		}
+	}
+
+	// Finally, we wrap the file cached token source in an memory cache, reducing the
+	// number of calls to the file system, and which handles refreshing when needed.
+	return oauth2.ReuseTokenSourceWithExpiry(nil, tokenSource, time.Minute*5), nil
 }
 
 // GoogleAuthRoundTripper is a custom http.RoundTripper implementation that handles
@@ -1329,35 +1397,11 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 		log.Error(msg)
 		return nil, err
 	}
-	// Underlying token store uses ADC loaded creds. This is what actually talks to the WIF token exchange endpoint for e.g.
-	tokenSource := creds.TokenSource
 
-	// If this is WIF auth, then wrap that in a file cached token source, which will cache the token
-	// in a file and only request a new token if the cached token is invalid. This reduces calls to
-	// WIF token exchange endpoints, reducing risk of rate limiting.
-	if os.Getenv("S5CMD_FILE_CACHING_OPT_OUT") == "" {
-		// Determine if this is WIF auth, and if so use file caching
-		content := map[string]interface{}{}
-		json.Unmarshal(creds.JSON, &content)
-		audience := content["audience"]
-		if audience != nil {
-			tokenSource = &FileCachedTokenSource{
-				underlying: tokenSource,
-				cacheFile:  filepath.Join(os.Getenv("HOME"), ".cache", "coo", "cached_s5cmd.json"),
-				audience:   audience.(string),
-			}
-		} else {
-			msg := log.DebugMessage{
-				Operation: "s3.newGoogleAuthenticationClient",
-				Err:       "No audience in creds, assuming no WIF token exchange endpoint and skipping cached auth",
-			}
-			log.Debug(msg)
-		}
+	tokenSource, err := createTokenSource(creds, filepath.Join(os.Getenv("HOME"), ".cache", "coo", "cached_s5cmd.json"))
+	if err != nil {
+		return nil, err
 	}
-
-	// Finally, we wrap the file cached token source in an memory cache, reducing the
-	// number of calls to the file system, and which handles refreshing when needed.
-	tokenSource = oauth2.ReuseTokenSourceWithExpiry(nil, creds.TokenSource, time.Minute*5)
 
 	transport := baseClient.Transport
 	if transport == nil {

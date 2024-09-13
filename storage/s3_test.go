@@ -30,10 +30,12 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"gotest.tools/v3/assert"
 
+	"path/filepath"
+
 	"github.com/peak/s5cmd/v2/log"
 	"github.com/peak/s5cmd/v2/storage/url"
 	"golang.org/x/oauth2"
-	"path/filepath"
+	"golang.org/x/oauth2/google"
 )
 
 func TestS3ImplementsStorageInterface(t *testing.T) {
@@ -1435,6 +1437,111 @@ func TestFileCachedTokenSourceWithAudience(t *testing.T) {
 
 		if cachedInfo.Audience != "test-audience" {
 			t.Errorf("Expected audience 'test-audience', got '%s'", cachedInfo.Audience)
+		}
+	})
+}
+
+func TestCreateTokenSource(t *testing.T) {
+	log.Init("debug", false)
+	// Create a temporary directory for the cache file
+	tempDir, err := os.MkdirTemp("", "token-cache-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cacheFilePath := filepath.Join(tempDir, "token-cache.json")
+
+	// Create a mock credentials with a unique token
+	credToken := &oauth2.Token{AccessToken: "cred-token"}
+	mockCreds := &google.Credentials{
+		ProjectID:   "test-project",
+		TokenSource: oauth2.StaticTokenSource(credToken),
+		JSON:        []byte(`{"type": "service_account", "audience": "test-audience"}`),
+	}
+
+	// Create a cache file with a different token
+	cacheToken := &oauth2.Token{AccessToken: "cache-token", Expiry: time.Now().Add(1 * time.Hour)}
+	cacheInfo := CachedTokenInfo{
+		Token:    cacheToken,
+		Audience: "test-audience",
+	}
+	cacheData, _ := json.Marshal(cacheInfo)
+	if err := os.WriteFile(cacheFilePath, cacheData, 0600); err != nil {
+		t.Fatalf("Failed to write cache file: %v", err)
+	}
+
+	// Test with file caching enabled
+	t.Run("With file caching", func(t *testing.T) {
+		os.Unsetenv("S5CMD_FILE_CACHING_OPT_OUT")
+		tokenSource, err := createTokenSource(mockCreds, cacheFilePath)
+		if err != nil {
+			t.Fatalf("createTokenSource failed: %v", err)
+		}
+
+		token, err := tokenSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+		if token.AccessToken != "cache-token" {
+			t.Errorf("Expected cached token 'cache-token', got '%s'", token.AccessToken)
+		}
+	})
+
+	// Test with file caching disabled
+	t.Run("Without file caching", func(t *testing.T) {
+		os.Setenv("S5CMD_FILE_CACHING_OPT_OUT", "true")
+		defer os.Unsetenv("S5CMD_FILE_CACHING_OPT_OUT")
+
+		tokenSource, err := createTokenSource(mockCreds, cacheFilePath)
+		if err != nil {
+			t.Fatalf("createTokenSource failed: %v", err)
+		}
+
+		token, err := tokenSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+		if token.AccessToken != "cred-token" {
+			t.Errorf("Expected credential token 'cred-token', got '%s'", token.AccessToken)
+		}
+	})
+
+	// New test case for directory creation
+	t.Run("Creates directory if not exists", func(t *testing.T) {
+		// Create a temporary base directory
+		tempBaseDir, err := os.MkdirTemp("", "token-base-test")
+		if err != nil {
+			t.Fatalf("Failed to create temp base dir: %v", err)
+		}
+		defer os.RemoveAll(tempBaseDir)
+
+		// Construct a path that doesn't exist yet
+		nonExistentDir := filepath.Join(tempBaseDir, "non", "existent", "dir")
+		cacheFilePath := filepath.Join(nonExistentDir, "token-cache.json")
+
+		os.Unsetenv("S5CMD_FILE_CACHING_OPT_OUT")
+
+		// Create a new token source
+		tokenSource, err := createTokenSource(mockCreds, cacheFilePath)
+		if err != nil {
+			t.Fatalf("createTokenSource failed: %v", err)
+		}
+
+		// Try to get a token, which should trigger directory creation
+		_, err = tokenSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+
+		// Check if the directory was created
+		if _, err := os.Stat(nonExistentDir); os.IsNotExist(err) {
+			t.Errorf("Expected directory to be created, but it doesn't exist")
+		}
+
+		// Check if the cache file was created
+		if _, err := os.Stat(cacheFilePath); os.IsNotExist(err) {
+			t.Errorf("Expected cache file to be created, but it doesn't exist")
 		}
 	})
 }
