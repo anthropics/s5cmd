@@ -4,3 +4,4 @@
 /s5cmd.exe
 /*.iml
 .DS_Store
+dist/
