@@ -1247,6 +1247,11 @@ func (c *FileCachedTokenSource) writeTokenToCache(token *oauth2.Token) error {
 		return fmt.Errorf("failed to marshal token: %v", err)
 	}
 
+	dir := filepath.Dir(c.cacheFile)
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		return fmt.Errorf("failed to create cache directory: %v", err)
+	}
+
 	err = lockedfile.Write(c.cacheFile, bytes.NewReader(data), 0600)
 	if err != nil {
 		return fmt.Errorf("failed to write cached token: %v", err)
@@ -1357,7 +1362,7 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 
 	// Finally, we wrap the file cached token source in an memory cache, reducing the
 	// number of calls to the file system, and which handles refreshing when needed.
-	tokenSource = oauth2.ReuseTokenSourceWithExpiry(nil, creds.TokenSource, time.Minute*5)
+	tokenSource = oauth2.ReuseTokenSourceWithExpiry(nil, tokenSource, time.Minute*5)
 
 	transport := baseClient.Transport
 	if transport == nil {
