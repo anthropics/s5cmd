@@ -232,6 +232,7 @@ type Metadata struct {
 	ContentDisposition string
 	EncryptionMethod   string
 	EncryptionKeyID    string
+	EncryptionContext  string
 
 	UserDefined map[string]string
 }
