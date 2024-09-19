@@ -539,6 +539,10 @@ func (s *S3) Copy(ctx context.Context, from, to *url.URL, metadata Metadata) err
 		if sseKmsKeyID != "" {
 			input.SSEKMSKeyId = aws.String(sseKmsKeyID)
 		}
+		sseEncryptionContext := metadata.EncryptionContext
+		if sseEncryptionContext != "" {
+			input.SSEKMSEncryptionContext = aws.String(sseEncryptionContext)
+		}
 	}
 
 	contentEncoding := metadata.ContentEncoding
@@ -850,6 +854,10 @@ func (s *S3) Put(
 		sseKmsKeyID := metadata.EncryptionKeyID
 		if sseKmsKeyID != "" {
 			input.SSEKMSKeyId = aws.String(sseKmsKeyID)
+		}
+		sseEncryptionContext := metadata.EncryptionContext
+		if sseEncryptionContext != "" {
+			input.SSEKMSEncryptionContext = aws.String(sseEncryptionContext)
 		}
 	}
 

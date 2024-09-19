@@ -68,6 +68,10 @@ func NewPipeCommandFlags() []cli.Flag {
 			Usage: "customer master key (CMK) id for SSE-KMS encryption; leave it out if server-side generated key is desired",
 		},
 		&cli.StringFlag{
+			Name:  "sse-kms-encryption-context",
+			Usage: "KMS Encryption Context to use for object encryption; base64-encoded UTF-8 string holding JSON",
+		},
+		&cli.StringFlag{
 			Name:  "acl",
 			Usage: "set acl for target: defines granted accesses and their types on different accounts/groups, e.g. pipe --acl 'public-read'",
 		},
@@ -146,6 +150,7 @@ type Pipe struct {
 	storageClass       storage.StorageClass
 	encryptionMethod   string
 	encryptionKeyID    string
+	encryptionContext  string
 	acl                string
 	cacheControl       string
 	expires            string
@@ -189,6 +194,7 @@ func NewPipe(c *cli.Context, deleteSource bool) (*Pipe, error) {
 		partSize:           c.Int64("part-size") * megabytes,
 		encryptionMethod:   c.String("sse"),
 		encryptionKeyID:    c.String("sse-kms-key-id"),
+		encryptionContext:  c.String("sse-context"),
 		acl:                c.String("acl"),
 		cacheControl:       c.String("cache-control"),
 		expires:            c.String("expires"),
@@ -231,6 +237,7 @@ func (c Pipe) Run(ctx context.Context) error {
 		ContentDisposition: c.contentDisposition,
 		EncryptionMethod:   c.encryptionMethod,
 		EncryptionKeyID:    c.encryptionKeyID,
+		EncryptionContext:  c.encryptionContext,
 	}
 
 	if c.contentType != "" {

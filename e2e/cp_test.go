@@ -833,6 +833,7 @@ func runTestCopySingleFileToS3WithAllMetadataFlags(t *testing.T, tc *testCase) {
 		ContentEncoding      = "utf-8"
 		EncryptionMethod     = "aws:kms"
 		EncryptionKeyID      = "1234abcd-12ab-34cd-56ef-1234567890ab"
+		EncryptionContext    = "eyJmb28iOiAiYmFyIn0="
 		contentType          = "text/html"
 		contentDisposition   = "inline"
 		contentEncoding      = "gzip"
@@ -869,6 +870,7 @@ func runTestCopySingleFileToS3WithAllMetadataFlags(t *testing.T, tc *testCase) {
 		"--content-encoding", ContentEncoding,
 		"--sse", EncryptionMethod,
 		"--sse-kms-key-id", EncryptionKeyID,
+		"--sse-kms-encryption-context", EncryptionContext,
 		srcpath, dstpath,
 	)
 	result := icmd.RunCmd(cmd)
@@ -892,6 +894,7 @@ func runTestCopySingleFileToS3WithAllMetadataFlags(t *testing.T, tc *testCase) {
 		ensureContentEncoding(ContentEncoding),
 		ensureEncryptionMethod(EncryptionMethod),
 		ensureEncryptionKeyID(EncryptionKeyID),
+		ensureEncryptionContext(EncryptionContext),
 	))
 }
 
@@ -937,6 +940,95 @@ func runTestCopySingleFileToS3WithArbitraryMetadata(t *testing.T, tc *testCase) 
 	assert.Assert(t, ensureS3Object(
 		s3client, bucket, filename, content,
 		ensureArbitraryMetadata(metadata),
+	))
+}
+
+func TestCopyS3ToS3WithWithAllMetadataFlags(t *testing.T) {
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.storage, func(t *testing.T) {
+			runTestCopyS3ToS3WitllAllMetadataFlags(t, &tc)
+		})
+	}
+}
+
+func runTestCopyS3ToS3WitllAllMetadataFlags(t *testing.T, tc *testCase) {
+	if tc.name == "GCP" {
+		// TODO(rr)
+		t.Skip("skipping test for GCS")
+	}
+	t.Parallel()
+
+	s3client, s5cmd := setup(t)
+	bucket := s3BucketFromTestName(t)
+	createBucket(t, s3client, bucket)
+	t.Log("created bucket:", bucket)
+
+	const (
+		filename             = "index"
+		content              = `testfilecontent`
+		cacheControl         = "public, max-age=3600"
+		expires              = "2025-01-01T00:00:00Z"
+		storageClass         = "STANDARD_IA"
+		ContentType          = "text/html; charset=utf-8"
+		ContentDisposition   = "inline"
+		ContentEncoding      = "utf-8"
+		EncryptionMethod     = "aws:kms"
+		EncryptionKeyID      = "1234abcd-12ab-34cd-56ef-1234567890ab"
+		EncryptionContext    = "eyJmb28iOiAiYmFyIn0="
+		contentType          = "text/html"
+		contentDisposition   = "inline"
+		contentEncoding      = "gzip"
+		contentLanguage      = "en"
+		expectedContentType  = contentType
+		expectedEncoding     = contentEncoding
+		expectedLanguage     = contentLanguage
+		expectedCacheControl = cacheControl
+		expectedDisposition  = contentDisposition
+		expectedStorageClass = "STANDARD"
+	)
+
+	// expected expires flag is the parsed version of the date in RFC3339 format
+	parsedTime, err := time.Parse(time.RFC3339, expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedExpires := parsedTime.Format(http.TimeFormat)
+
+	dstfile := fmt.Sprintf("%v_cp", filename)
+	srcpath := fmt.Sprintf("%v://%v/%v", tc.storage, bucket, filename)
+	dstpath := fmt.Sprintf("%v://%v/%v", tc.storage, bucket, dstfile)
+	putFile(t, s3client, bucket, filename, content)
+	srcpath = filepath.ToSlash(srcpath)
+	cmd := s5cmd("cp",
+		"--cache-control", cacheControl,
+		"--expires", expires,
+		"--storage-class", storageClass,
+		"--content-disposition", ContentDisposition,
+		"--content-encoding", ContentEncoding,
+		"--sse", EncryptionMethod,
+		"--sse-kms-key-id", EncryptionKeyID,
+		"--sse-kms-encryption-context", EncryptionContext,
+		srcpath, dstpath,
+	)
+	result := icmd.RunCmd(cmd)
+
+	result.Assert(t, icmd.Success)
+	assertLines(t, result.Stdout(), map[int]compareFunc{
+		0: prefix("cp "),
+	})
+
+	// assert S3/GCS
+	assert.Assert(t, ensureS3Object(s3client, bucket, dstfile, content,
+		ensureExpires(expectedExpires),
+		ensureCacheControl(cacheControl),
+		ensureStorageClass(storageClass),
+		ensureContentDisposition(ContentDisposition),
+		ensureContentEncoding(ContentEncoding),
+		ensureEncryptionMethod(EncryptionMethod),
+		ensureEncryptionKeyID(EncryptionKeyID),
+		ensureEncryptionContext(EncryptionContext),
 	))
 }
 

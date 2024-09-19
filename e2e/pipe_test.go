@@ -484,6 +484,7 @@ func TestUploadStdinToToS3WithAllMetadataFlags(t *testing.T) {
 		ContentEncoding    = "utf-8"
 		EncryptionMethod   = "aws:kms"
 		EncryptionKeyID    = "1234abcd-12ab-34cd-56ef-1234567890ab"
+		EncryptionContext  = "eyJmb28iOiAiYmFyIn0="
 	)
 
 	// expected expires flag is the parsed version of the date in RFC3339 format
@@ -510,6 +511,7 @@ func TestUploadStdinToToS3WithAllMetadataFlags(t *testing.T) {
 		"--content-encoding", ContentEncoding,
 		"--sse", EncryptionMethod,
 		"--sse-kms-key-id", EncryptionKeyID,
+		"--sse-kms-encryption-context", EncryptionContext,
 		dstpath,
 	)
 
@@ -527,5 +529,6 @@ func TestUploadStdinToToS3WithAllMetadataFlags(t *testing.T) {
 		ensureContentEncoding(ContentEncoding),
 		ensureEncryptionMethod(EncryptionMethod),
 		ensureEncryptionKeyID(EncryptionKeyID),
+		ensureEncryptionContext(EncryptionContext),
 	))
 }
