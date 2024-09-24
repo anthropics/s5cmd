@@ -659,14 +659,16 @@ func TestS3RetryOnNoSuchUpload(t *testing.T) {
 
 func TestS3CopyEncryptionRequest(t *testing.T) {
 	testcases := []struct {
-		name     string
-		sse      string
-		sseKeyID string
-		acl      string
+		name       string
+		sse        string
+		sseKeyID   string
+		sseContext string
+		acl        string
 
-		expectedSSE      string
-		expectedSSEKeyID string
-		expectedACL      string
+		expectedSSE        string
+		expectedSSEKeyID   string
+		expectedSSEContext string
+		expectedACL        string
 	}{
 		{
 			name: "no encryption/no acl, by default",
@@ -678,16 +680,19 @@ func TestS3CopyEncryptionRequest(t *testing.T) {
 			expectedSSE: "aws:kms",
 		},
 		{
-			name:     "aws:kms encryption with user provided key",
-			sse:      "aws:kms",
-			sseKeyID: "sdkjn12SDdci#@#EFRFERTqW/ke",
+			name:       "aws:kms encryption with user provided key and context",
+			sse:        "aws:kms",
+			sseKeyID:   "sdkjn12SDdci#@#EFRFERTqW/ke",
+			sseContext: "eyJmb28iOiAiYmFyIn0=",
 
-			expectedSSE:      "aws:kms",
-			expectedSSEKeyID: "sdkjn12SDdci#@#EFRFERTqW/ke",
+			expectedSSE:        "aws:kms",
+			expectedSSEKeyID:   "sdkjn12SDdci#@#EFRFERTqW/ke",
+			expectedSSEContext: "eyJmb28iOiAiYmFyIn0=",
 		},
 		{
-			name:     "provide key without encryption flag, shall be ignored",
-			sseKeyID: "1234567890",
+			name:       "provide key and context without encryption flag, shall be ignored",
+			sseKeyID:   "1234567890",
+			sseContext: "eyJmb28iOiAiYmFyIn0=",
 		},
 		{
 			name:        "acl flag with a value",
@@ -721,12 +726,16 @@ func TestS3CopyEncryptionRequest(t *testing.T) {
 				params := r.Params
 				sse := valueAtPath(params, "ServerSideEncryption")
 				key := valueAtPath(params, "SSEKMSKeyId")
+				context := valueAtPath(params, "SSEKMSEncryptionContext")
 
 				if !(sse == nil && tc.expectedSSE == "") {
 					assert.Equal(t, sse, tc.expectedSSE)
 				}
 				if !(key == nil && tc.expectedSSEKeyID == "") {
 					assert.Equal(t, key, tc.expectedSSEKeyID)
+				}
+				if !(context == nil && tc.expectedSSEContext == "") {
+					assert.Equal(t, context, tc.expectedSSEContext)
 				}
 
 				aclVal := valueAtPath(r.Params, "ACL")
@@ -753,6 +762,7 @@ func TestS3CopyEncryptionRequest(t *testing.T) {
 			metadata := Metadata{}
 			metadata.EncryptionMethod = tc.sse
 			metadata.EncryptionKeyID = tc.sseKeyID
+			metadata.EncryptionContext = tc.sseContext
 			metadata.ACL = tc.acl
 
 			err = mockS3.Copy(context.Background(), u, u, metadata)
@@ -766,14 +776,16 @@ func TestS3CopyEncryptionRequest(t *testing.T) {
 
 func TestS3PutEncryptionRequest(t *testing.T) {
 	testcases := []struct {
-		name     string
-		sse      string
-		sseKeyID string
-		acl      string
+		name       string
+		sse        string
+		sseKeyID   string
+		sseContext string
+		acl        string
 
-		expectedSSE      string
-		expectedSSEKeyID string
-		expectedACL      string
+		expectedSSE        string
+		expectedSSEKeyID   string
+		expectedSSEContext string
+		expectedACL        string
 	}{
 		{
 			name: "no encryption, no acl flag",
@@ -784,16 +796,19 @@ func TestS3PutEncryptionRequest(t *testing.T) {
 			expectedSSE: "aws:kms",
 		},
 		{
-			name:     "aws:kms encryption with user provided key",
-			sse:      "aws:kms",
-			sseKeyID: "sdkjn12SDdci#@#EFRFERTqW/ke",
+			name:       "aws:kms encryption with user provided key",
+			sse:        "aws:kms",
+			sseKeyID:   "sdkjn12SDdci#@#EFRFERTqW/ke",
+			sseContext: "eyJmb28iOiAiYmFyIn0=",
 
-			expectedSSE:      "aws:kms",
-			expectedSSEKeyID: "sdkjn12SDdci#@#EFRFERTqW/ke",
+			expectedSSE:        "aws:kms",
+			expectedSSEKeyID:   "sdkjn12SDdci#@#EFRFERTqW/ke",
+			expectedSSEContext: "eyJmb28iOiAiYmFyIn0=",
 		},
 		{
-			name:     "provide key without encryption flag, shall be ignored",
-			sseKeyID: "1234567890",
+			name:       "provide key and context without encryption flag, shall be ignored",
+			sseKeyID:   "1234567890",
+			sseContext: "eyJmb28iOiAiYmFyIn0=",
 		},
 		{
 			name:        "acl flag with a value",
@@ -826,12 +841,16 @@ func TestS3PutEncryptionRequest(t *testing.T) {
 				params := r.Params
 				sse := valueAtPath(params, "ServerSideEncryption")
 				key := valueAtPath(params, "SSEKMSKeyId")
+				context := valueAtPath(params, "SSEKMSEncryptionContext")
 
 				if !(sse == nil && tc.expectedSSE == "") {
 					assert.Equal(t, sse, tc.expectedSSE)
 				}
 				if !(key == nil && tc.expectedSSEKeyID == "") {
 					assert.Equal(t, key, tc.expectedSSEKeyID)
+				}
+				if !(context == nil && tc.expectedSSEContext == "") {
+					assert.Equal(t, context, tc.expectedSSEContext)
 				}
 
 				aclVal := valueAtPath(r.Params, "ACL")
@@ -849,6 +868,7 @@ func TestS3PutEncryptionRequest(t *testing.T) {
 			metadata := Metadata{}
 			metadata.EncryptionMethod = tc.sse
 			metadata.EncryptionKeyID = tc.sseKeyID
+			metadata.EncryptionContext = tc.sseContext
 			metadata.ACL = tc.acl
 
 			err = mockS3.Put(context.Background(), bytes.NewReader([]byte("")), u, metadata, 1, 5242880)

@@ -79,7 +79,7 @@ Examples:
 		 > s5cmd {{.HelpName}} --sse aws:kms s3://bucket/object s3://target-bucket/prefix/object
 
 	13. Perform KMS-SSE of the object(s) at the destination using customer managed Customer Master Key (CMK) key id
-		 > s5cmd {{.HelpName}} --sse aws:kms --sse-kms-key-id <your-kms-key-id> s3://bucket/object s3://target-bucket/prefix/object
+		 > s5cmd {{.HelpName}} --sse aws:kms --sse-kms-key-id <your-kms-key-id> --sse-kms-encryption-context <encryption-context> s3://bucket/object s3://target-bucket/prefix/object
 
 	14. Force transfer of GLACIER objects with a prefix whether they are restored or not
 		 > s5cmd {{.HelpName}} --force-glacier-transfer "s3://bucket/prefix/*" target-directory/
@@ -107,12 +107,12 @@ Examples:
 
 	22. Upload a file to S3 with a content-type and content-encoding header
 		 > s5cmd --content-type "text/css" --content-encoding "br" myfile.css.br s3://bucket/
-		 
+
 	23. Download the specific version of a remote object to working directory
 		 > s5cmd {{.HelpName}} --version-id VERSION_ID s3://bucket/prefix/object .
 
-	24. Pass arbitrary metadata to the object during upload or copy 
-		 > s5cmd {{.HelpName}} --metadata "camera=Nixon D750" --metadata "imageSize=6032x4032" flowers.png s3://bucket/prefix/flowers.png 
+	24. Pass arbitrary metadata to the object during upload or copy
+		 > s5cmd {{.HelpName}} --metadata "camera=Nixon D750" --metadata "imageSize=6032x4032" flowers.png s3://bucket/prefix/flowers.png
 `
 
 func NewSharedFlags() []cli.Flag {
@@ -148,6 +148,10 @@ func NewSharedFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:  "sse-kms-key-id",
 			Usage: "customer master key (CMK) id for SSE-KMS encryption; leave it out if server-side generated key is desired",
+		},
+		&cli.StringFlag{
+			Name:  "sse-kms-encryption-context",
+			Usage: "KMS Encryption Context to use for object encryption; base64-encoded UTF-8 string holding JSON",
 		},
 		&cli.StringFlag{
 			Name:  "acl",
@@ -294,6 +298,7 @@ type Copy struct {
 	storageClass          storage.StorageClass
 	encryptionMethod      string
 	encryptionKeyID       string
+	encryptionContext     string
 	acl                   string
 	forceGlacierTransfer  bool
 	ignoreGlacierWarnings bool
@@ -371,6 +376,7 @@ func NewCopy(c *cli.Context, deleteSource bool) (*Copy, error) {
 		partSize:              c.Int64("part-size") * megabytes,
 		encryptionMethod:      c.String("sse"),
 		encryptionKeyID:       c.String("sse-kms-key-id"),
+		encryptionContext:     c.String("sse-kms-encryption-context"),
 		acl:                   c.String("acl"),
 		forceGlacierTransfer:  c.Bool("force-glacier-transfer"),
 		ignoreGlacierWarnings: c.Bool("ignore-glacier-warnings"),
@@ -700,6 +706,7 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, ex
 		ContentDisposition: c.contentDisposition,
 		EncryptionMethod:   c.encryptionMethod,
 		EncryptionKeyID:    c.encryptionKeyID,
+		EncryptionContext:  c.encryptionContext,
 	}
 
 	if c.contentType != "" {
@@ -765,6 +772,7 @@ func (c Copy) doCopy(ctx context.Context, srcurl, dsturl *url.URL, extradata map
 		ContentDisposition: c.contentDisposition,
 		EncryptionMethod:   c.encryptionMethod,
 		EncryptionKeyID:    c.encryptionKeyID,
+		EncryptionContext:  c.encryptionContext,
 	}
 
 	err = c.shouldOverride(ctx, srcurl, dsturl)
