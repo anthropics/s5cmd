@@ -586,6 +586,7 @@ type ensureOpts struct {
 	contentEncoding    *string
 	encryptionMethod   *string
 	encryptionKeyID    *string
+	encryptionContext  *string
 	metadata           map[string]*string
 }
 
@@ -637,6 +638,13 @@ func ensureEncryptionKeyID(encryptionKeyID string) ensureOption {
 		opts.encryptionKeyID = &encryptionKeyID
 	}
 }
+
+func ensureEncryptionContext(encryptionContext string) ensureOption {
+	return func(opts *ensureOpts) {
+		opts.encryptionContext = &encryptionContext
+	}
+}
+
 func ensureArbitraryMetadata(metadata map[string]*string) ensureOption {
 	return func(opts *ensureOpts) {
 		opts.metadata = metadata
