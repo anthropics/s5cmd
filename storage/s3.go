@@ -1451,15 +1451,11 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 
 	token, err := c.tokenSource.Token()
 	if err != nil {
-		msg := log.ErrorMessage{
-			Command: "tokenSource.Token",
-			Err:     "Could not load token - ensure you're logged in",
-		}
-		log.Error(msg)
-	} else {
-		token.SetAuthHeader(req)
+		// Note: this error should retry, given WIF credential issues are transient
+		return nil, fmt.Errorf("could not load Google auth token, error: %v", err)
 	}
 
+	token.SetAuthHeader(req)
 	return c.transport.RoundTrip(req)
 }
 
