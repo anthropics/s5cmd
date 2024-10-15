@@ -1367,13 +1367,12 @@ func TestFileCachedTokenSourceWithAudience(t *testing.T) {
 
 	cacheFile := filepath.Join(tempDir, "token-cache.json")
 
-	mockSource := &mockTokenSource{
-		token: &oauth2.Token{
-			AccessToken: "mock-token",
-			TokenType:   "Bearer",
-			Expiry:      time.Now().Add(1 * time.Hour),
-		},
+	mockToken := &oauth2.Token{
+		AccessToken: "mock-token",
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(1 * time.Hour),
 	}
+	mockSource := &mockTokenSource{token: mockToken}
 
 	t.Run("Audience mismatch", func(t *testing.T) {
 		cachedSource := &FileCachedTokenSource{
@@ -1457,6 +1456,56 @@ func TestFileCachedTokenSourceWithAudience(t *testing.T) {
 
 		if cachedInfo.Audience != "test-audience" {
 			t.Errorf("Expected audience 'test-audience', got '%s'", cachedInfo.Audience)
+		}
+	})
+
+	t.Run("Non-existent cache file", func(t *testing.T) {
+		nonExistentCacheFile := filepath.Join(tempDir, "non-existent-cache.json")
+		cachedSource := &FileCachedTokenSource{
+			underlying: mockSource,
+			cacheFile:  nonExistentCacheFile,
+			audience:   "test-audience",
+		}
+
+		// Verify that the cache file doesn't exist initially
+		if _, err := os.Stat(nonExistentCacheFile); !os.IsNotExist(err) {
+			t.Fatalf("Cache file should not exist at the start of the test")
+		}
+
+		// Get the token
+		token, err := cachedSource.Token()
+		if err != nil {
+			t.Fatalf("Failed to get token: %v", err)
+		}
+
+		// Check if the returned token is correct
+		if token.AccessToken != mockToken.AccessToken {
+			t.Errorf("Expected token %s, got %s", mockToken.AccessToken, token.AccessToken)
+		}
+
+		// Verify that the cache file was created
+		if _, err := os.Stat(nonExistentCacheFile); os.IsNotExist(err) {
+			t.Errorf("Expected cache file to be created, but it doesn't exist")
+		}
+
+		// Read the cache file and verify its contents
+		data, err := os.ReadFile(nonExistentCacheFile)
+		if err != nil {
+			t.Fatalf("Failed to read cache file: %v", err)
+		}
+
+		var cachedInfo CachedTokenInfo
+		err = json.Unmarshal(data, &cachedInfo)
+		if err != nil {
+			t.Fatalf("Failed to unmarshal cache data: %v", err)
+		}
+
+		if cachedInfo.Audience != "test-audience" {
+			t.Errorf("Expected audience 'test-audience', got '%s'", cachedInfo.Audience)
+		}
+
+		if cachedInfo.Token.AccessToken != mockToken.AccessToken {
+			t.Errorf("Expected cached token %s, got %s", mockToken.AccessToken, cachedInfo.Token.AccessToken)
 		}
 	})
 }
@@ -1572,6 +1621,49 @@ type mockTokenSource struct {
 
 func (m *mockTokenSource) Token() (*oauth2.Token, error) {
 	return m.token, nil
+}
+
+func TestTokenCacheExists(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "token-cache-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	nonExistentFile := filepath.Join(tempDir, "non-existent-cache.json")
+	existingFile := filepath.Join(tempDir, "existing-cache.json")
+
+	// Create an empty file
+	if err := os.WriteFile(existingFile, []byte{}, 0600); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	testCases := []struct {
+		name      string
+		cacheFile string
+		expected  bool
+	}{
+		{
+			name:      "Non-existent cache file",
+			cacheFile: nonExistentFile,
+			expected:  false,
+		},
+		{
+			name:      "Existing cache file",
+			cacheFile: existingFile,
+			expected:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := &FileCachedTokenSource{cacheFile: tc.cacheFile}
+			result := source.tokenCacheExists()
+			if result != tc.expected {
+				t.Errorf("Expected tokenCacheExists() to return %v, got %v", tc.expected, result)
+			}
+		})
+	}
 }
 
 func valueAtPath(i interface{}, s string) interface{} {

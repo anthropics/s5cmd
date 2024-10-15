@@ -1210,6 +1210,15 @@ func (c *FileCachedTokenSource) ensureDirectoryExists() error {
 	return os.MkdirAll(dir, 0700)
 }
 
+// tokenCacheExists checks if the token cache file exists.
+//
+// Returns:
+//   - bool: True if the cache file exists, false otherwise.
+func (c *FileCachedTokenSource) tokenCacheExists() bool {
+	_, err := os.Stat(c.cacheFile)
+	return err == nil
+}
+
 // readTokenFromCache attempts to read and parse an OAuth2 token from the cache file.
 //
 // This function uses lockedfile.Read to safely read the contents of the cache file,
@@ -1297,26 +1306,34 @@ func (c *FileCachedTokenSource) writeTokenToCache(token *oauth2.Token) error {
 //   - *oauth2.Token: The valid OAuth2 token
 //   - error: An error if token retrieval or caching fails
 func (c *FileCachedTokenSource) Token() (*oauth2.Token, error) {
-	cachedInfo, err := c.readTokenFromCache()
-	if err != nil {
-		// Log the error but don't fail
-		msg := log.ErrorMessage{
-			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Errorf("failed to read token from cache: %v", err).Error(),
+	if c.tokenCacheExists() {
+		cachedInfo, err := c.readTokenFromCache()
+		if err != nil {
+			// Log the error but don't fail
+			msg := log.ErrorMessage{
+				Command: "FileCachedTokenSource.Token",
+				Err:     fmt.Errorf("failed to read token from cache: %v", err).Error(),
+			}
+			log.Error(msg)
+		} else if cachedInfo.Audience != c.audience {
+			msg := log.DebugMessage{
+				Command: "FileCachedTokenSource.Token",
+				Err:     fmt.Sprintf("failed to read token from cache: audience mismatch\nCurrent audience: %v\nNew audience: %v", cachedInfo.Audience, c.audience),
+			}
+			log.Debug(msg)
+		} else if cachedInfo.Token.Valid() && time.Until(cachedInfo.Token.Expiry) >= 5*time.Minute {
+			return cachedInfo.Token, nil
+		} else {
+			msg := log.DebugMessage{
+				Command: "FileCachedTokenSource.Token",
+				Err:     fmt.Sprintf("cached token not usable: \nValid: %v\ntime until expiry: %v", cachedInfo.Token.Valid(), time.Until(cachedInfo.Token.Expiry)),
+			}
+			log.Debug(msg)
 		}
-		log.Error(msg)
-	} else if cachedInfo.Audience != c.audience {
-		msg := log.DebugMessage{
-			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Sprintf("failed to read token from cache: audience mismatch\nCurrent audience: %v\nNew audience: %v", cachedInfo.Audience, c.audience),
-		}
-		log.Debug(msg)
-	} else if cachedInfo.Token.Valid() && time.Until(cachedInfo.Token.Expiry) >= 5*time.Minute {
-		return cachedInfo.Token, nil
 	} else {
 		msg := log.DebugMessage{
 			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Sprintf("cached token not usable: \nValid: %v\ntime until expiry: %v", cachedInfo.Token.Valid(), time.Until(cachedInfo.Token.Expiry)),
+			Err:     fmt.Sprintf("cached file doesn't exist, skipping trying to load from cache. Path: %v", c.cacheFile),
 		}
 		log.Debug(msg)
 	}
