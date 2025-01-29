@@ -1562,6 +1562,13 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 	}
 
 	token.SetAuthHeader(req)
+
+	// Add hostname to User-Agent for WIF token requests
+	hostname, _ := os.Hostname()
+	if hostname != "" {
+		req.Header.Set("User-Agent", "s5cmd/" + hostname)
+	}
+
 	return c.transport.RoundTrip(req)
 }
 
