@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -35,7 +34,6 @@ import (
 
 	"github.com/peak/s5cmd/v2/log"
 	"github.com/peak/s5cmd/v2/storage/url"
-	"github.com/rogpeppe/go-internal/lockedfile"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -1195,38 +1193,170 @@ type CachedTokenInfo struct {
 }
 
 type FileCachedTokenSource struct {
-	underlying oauth2.TokenSource
-	cacheFile  string
-	audience   string
+	underlying  oauth2.TokenSource
+	cacheFile   string
+	audience    string
+	lockTimeout time.Duration
 }
 
-// ensureDirectoryExists creates the directory path for the cache file if it doesn't exist.
-// It uses os.MkdirAll to create all necessary parent directories with permissions set to 0700 (rwx------).
-//
-// Returns:
-//   - error: An error if the directory creation fails, or nil if successful.
-func (c *FileCachedTokenSource) ensureDirectoryExists() error {
-	dir := filepath.Dir(c.cacheFile)
-	return os.MkdirAll(dir, 0700)
+// tryReadToken attempts to read a valid token without acquiring a lock
+func (c *FileCachedTokenSource) tryReadToken() (*oauth2.Token, error) {
+	cachedInfo, err := c.readTokenFromCache()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read token: %v", err)
+	}
+	
+	if !c.isTokenValid(cachedInfo) {
+		return nil, fmt.Errorf("token not valid")
+	}
+	
+	return cachedInfo.Token, nil
 }
 
-// tokenCacheExists checks if the token cache file exists.
-//
-// Returns:
-//   - bool: True if the cache file exists, false otherwise.
-func (c *FileCachedTokenSource) tokenCacheExists() bool {
-	_, err := os.Stat(c.cacheFile)
-	return err == nil
+// isTokenValid checks if the cached token info is valid
+func (c *FileCachedTokenSource) isTokenValid(info *CachedTokenInfo) bool {
+	if info == nil || info.Token == nil {
+		return false
+	}
+	
+	// Check audience
+	if info.Audience != c.audience {
+		msg := log.DebugMessage{
+			Command: "FileCachedTokenSource.isTokenValid",
+			Err:     fmt.Sprintf("audience mismatch: cached=%v, current=%v", info.Audience, c.audience),
+		}
+		log.Debug(msg)
+		return false
+	}
+	
+	// Check expiration (5 min buffer)
+	if !info.Token.Valid() || time.Until(info.Token.Expiry) < 5*time.Minute {
+		msg := log.DebugMessage{
+			Command: "FileCachedTokenSource.isTokenValid",
+			Err:     fmt.Sprintf("token not valid or expiring soon: valid=%v, time until expiry=%v",
+				info.Token.Valid(), time.Until(info.Token.Expiry)),
+		}
+		log.Debug(msg)
+		return false
+	}
+	
+	return true
 }
 
-// readTokenFromCache attempts to read and parse an OAuth2 token from the cache file.
-//
-// This function uses lockedfile.Read to safely read the contents of the cache file,
-// then unmarshals the JSON data into an oauth2.Token struct.
-//
-// Returns:
-//   - *oauth2.Token: The parsed OAuth2 token if successful
-//   - error: An error if reading or parsing the cache file fails
+// acquireLock attempts to create a lock directory
+func (c *FileCachedTokenSource) acquireLock() error {
+	lockDir := c.cacheFile + ".lock"
+	
+	// Try to create lock directory
+	err := os.Mkdir(lockDir, 0700)
+	if err == nil {
+		// Success, create timestamp file
+		return os.WriteFile(filepath.Join(lockDir, "timestamp"), 
+			[]byte(time.Now().Format(time.RFC3339)), 0600)
+	}
+	
+	if os.IsExist(err) {
+		// Check for stale lock
+		return c.checkAndBreakStaleLock(lockDir)
+	}
+	
+	return err
+}
+
+// checkAndBreakStaleLock checks if the lock is stale and breaks it if needed
+func (c *FileCachedTokenSource) checkAndBreakStaleLock(lockDir string) error {
+	if c.lockTimeout == 0 {
+		c.lockTimeout = 3 * time.Minute
+	}
+
+	// Read timestamp from lock dir
+	timestampFile := filepath.Join(lockDir, "timestamp")
+	data, err := os.ReadFile(timestampFile)
+	if err != nil {
+		// Can't read timestamp, assume stale after timeout
+		if info, err := os.Stat(lockDir); err == nil {
+			if time.Since(info.ModTime()) > c.lockTimeout {
+				return c.breakLock(lockDir)
+			}
+		}
+		return fmt.Errorf("lock exists and can't verify timestamp")
+	}
+
+	timestamp, err := time.Parse(time.RFC3339, string(data))
+	if err != nil {
+		// Invalid timestamp, break if old enough
+		if info, err := os.Stat(lockDir); err == nil {
+			if time.Since(info.ModTime()) > c.lockTimeout {
+				return c.breakLock(lockDir)
+			}
+		}
+		return fmt.Errorf("invalid lock timestamp")
+	}
+
+	// Break lock if older than timeout
+	if time.Since(timestamp) > c.lockTimeout {
+		return c.breakLock(lockDir)
+	}
+
+	return fmt.Errorf("lock is held")
+}
+
+// breakLock removes the lock directory
+func (c *FileCachedTokenSource) breakLock(lockDir string) error {
+	msg := log.DebugMessage{
+		Command: "FileCachedTokenSource.breakLock",
+		Err:     fmt.Sprintf("breaking stale lock: %s", lockDir),
+	}
+	log.Debug(msg)
+	return os.RemoveAll(lockDir)
+}
+
+// releaseLock removes the lock directory
+func (c *FileCachedTokenSource) releaseLock() {
+	lockDir := c.cacheFile + ".lock"
+	os.RemoveAll(lockDir)
+}
+
+// writeTokenAtomically writes token to a temp file and renames it
+func (c *FileCachedTokenSource) writeTokenAtomically(info *CachedTokenInfo) error {
+	msg := log.DebugMessage{
+		Operation: "FileCachedTokenSource.writeTokenAtomically",
+		Err:       fmt.Sprintf("writing token to cache file %v", c.cacheFile),
+	}
+	log.Debug(msg)
+
+	// Create temp file with random suffix
+	randBytes := make([]byte, 8)
+	rand.Read(randBytes)
+	tempFile := c.cacheFile + ".tmp." + fmt.Sprintf("%x", randBytes)
+	
+	// Ensure cache directory exists
+	if err := os.MkdirAll(filepath.Dir(c.cacheFile), 0700); err != nil {
+		return fmt.Errorf("failed to create cache directory: %v", err)
+	}
+
+	// Marshal with indentation for readability
+	data, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal token: %v", err)
+	}
+
+	// Write to temp file with restrictive permissions
+	if err := os.WriteFile(tempFile, data, 0600); err != nil {
+		os.Remove(tempFile) // Clean up on failure
+		return fmt.Errorf("failed to write temp file: %v", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tempFile, c.cacheFile); err != nil {
+		os.Remove(tempFile)
+		return fmt.Errorf("failed to rename temp file: %v", err)
+	}
+
+	return nil
+}
+
+// readTokenFromCache reads token from cache file
 func (c *FileCachedTokenSource) readTokenFromCache() (*CachedTokenInfo, error) {
 	msg := log.DebugMessage{
 		Operation: "FileCachedTokenSource.readTokenFromCache",
@@ -1234,11 +1364,7 @@ func (c *FileCachedTokenSource) readTokenFromCache() (*CachedTokenInfo, error) {
 	}
 	log.Debug(msg)
 
-	if err := c.ensureDirectoryExists(); err != nil {
-		return nil, fmt.Errorf("failed to create cache directory: %v", err)
-	}
-
-	data, err := lockedfile.Read(c.cacheFile)
+	data, err := os.ReadFile(c.cacheFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read cached token: %v", err)
 	}
@@ -1251,110 +1377,72 @@ func (c *FileCachedTokenSource) readTokenFromCache() (*CachedTokenInfo, error) {
 	return &cachedInfo, nil
 }
 
-// writeTokenToCache marshals the given OAuth2 token to JSON and writes it to the cache file.
-//
-// This function uses json.Marshal to convert the token to JSON format, then uses
-// lockedfile.Write to safely write the data to the cache file. The file permissions
-// are set to 0600 (read/write for owner only) for security.
-//
-// Parameters:
-//   - token: The OAuth2 token to be cached
-//
-// Returns:
-//   - error: An error if marshalling or writing to the cache file fails
-func (c *FileCachedTokenSource) writeTokenToCache(token *oauth2.Token) error {
-	msg := log.DebugMessage{
-		Operation: "FileCachedTokenSource.writeTokenToCache",
-		Err:       fmt.Sprintf("writing token to cache file %v", c.cacheFile),
-	}
-	log.Debug(msg)
-
-	if err := c.ensureDirectoryExists(); err != nil {
-		return fmt.Errorf("failed to create cache directory: %v", err)
-	}
-
-	cachedInfo := CachedTokenInfo{
-		Token:    token,
-		Audience: c.audience,
-	}
-
-	data, err := json.Marshal(cachedInfo)
-	if err != nil {
-		return fmt.Errorf("failed to marshal token: %v", err)
-	}
-
-	err = lockedfile.Write(c.cacheFile, bytes.NewReader(data), 0600)
-	if err != nil {
-		return fmt.Errorf("failed to write cached token: %v", err)
-	}
-
-	return nil
-}
-
-// Token returns an OAuth2 token from the cache if it's valid, or from the underlying
-// token source if not. It implements the oauth2.TokenSource interface.
-//
-// The function first attempts to read a token from the cache file. If successful
-// and the token is still valid, it returns this cached token. Otherwise, it
-// requests a new token from the underlying token source.
-//
-// If a new token is obtained, it's written to the cache file for future use.
-// The function also sets an expiry delta of 5 minutes to ensure the token
-// is refreshed slightly before its actual expiration time.
-//
-// Returns:
-//   - *oauth2.Token: The valid OAuth2 token
-//   - error: An error if token retrieval or caching fails
+// Token implements oauth2.TokenSource
 func (c *FileCachedTokenSource) Token() (*oauth2.Token, error) {
-	if c.tokenCacheExists() {
-		cachedInfo, err := c.readTokenFromCache()
-		if err != nil {
-			// Log the error but don't fail
-			msg := log.ErrorMessage{
-				Command: "FileCachedTokenSource.Token",
-				Err:     fmt.Errorf("failed to read token from cache: %v", err).Error(),
-			}
-			log.Error(msg)
-		} else if cachedInfo.Audience != c.audience {
-			msg := log.DebugMessage{
-				Command: "FileCachedTokenSource.Token",
-				Err:     fmt.Sprintf("failed to read token from cache: audience mismatch\nCurrent audience: %v\nNew audience: %v", cachedInfo.Audience, c.audience),
-			}
-			log.Debug(msg)
-		} else if cachedInfo.Token.Valid() && time.Until(cachedInfo.Token.Expiry) >= 5*time.Minute {
-			return cachedInfo.Token, nil
-		} else {
-			msg := log.DebugMessage{
-				Command: "FileCachedTokenSource.Token",
-				Err:     fmt.Sprintf("cached token not usable: \nValid: %v\ntime until expiry: %v", cachedInfo.Token.Valid(), time.Until(cachedInfo.Token.Expiry)),
-			}
-			log.Debug(msg)
-		}
-	} else {
+	// Try non-blocking read first
+	if token, err := c.tryReadToken(); err == nil {
+		return token, nil
+	}
+
+	// Need to refresh, acquire lock
+	if err := c.acquireLock(); err != nil {
 		msg := log.DebugMessage{
 			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Sprintf("cached file doesn't exist, skipping trying to load from cache. Path: %v", c.cacheFile),
+			Err:     fmt.Sprintf("failed to acquire lock: %v", err),
 		}
 		log.Debug(msg)
+		// Fall back to underlying token source if lock fails
+		return c.underlying.Token()
+	}
+	defer c.releaseLock()
+
+	// Check again after lock (maybe another process updated)
+	cachedInfo, err := c.readTokenFromCache()
+	if err == nil && c.isTokenValid(cachedInfo) {
+		return cachedInfo.Token, nil
 	}
 
-	// If cache read fails or token is invalid, get a new token
+	// Get new token
 	token, err := c.underlying.Token()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get token from underlying source: %v", err)
 	}
 
-	// Cache the new token
-	if err := c.writeTokenToCache(token); err != nil {
-		// Log the error but don't fail
-		msg := log.ErrorMessage{
+	// Write new token
+	info := &CachedTokenInfo{
+		Token:    token,
+		Audience: c.audience,
+	}
+	
+	if err := c.writeTokenAtomically(info); err != nil {
+		msg := log.DebugMessage{
 			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Errorf("failed to cache token: %v", err).Error(),
+			Err:     fmt.Sprintf("failed to write token cache: %v", err),
 		}
-		log.Error(msg)
+		log.Debug(msg)
 	}
 
 	return token, nil
+}
+
+// cleanup removes stale temp files and locks
+func (c *FileCachedTokenSource) cleanup() {
+	// Clean up temp files older than 1 hour
+	pattern := c.cacheFile + ".tmp.*"
+	matches, _ := filepath.Glob(pattern)
+	for _, f := range matches {
+		if info, err := os.Stat(f); err == nil {
+			if time.Since(info.ModTime()) > time.Hour {
+				os.Remove(f)
+			}
+		}
+	}
+	
+	// Check for stale lock
+	lockDir := c.cacheFile + ".lock"
+	if _, err := os.Stat(lockDir); err == nil {
+		c.checkAndBreakStaleLock(lockDir)
+	}
 }
 
 // createTokenSource creates an OAuth2 token source from the given Google credentials.
@@ -1382,9 +1470,10 @@ func createTokenSource(creds *google.Credentials, cacheFilePath string) (oauth2.
 		audience := content["audience"]
 		if audience != nil {
 			tokenSource = &FileCachedTokenSource{
-				underlying: tokenSource,
-				cacheFile:  cacheFilePath,
-				audience:   audience.(string),
+				underlying:  tokenSource,
+				cacheFile:   cacheFilePath,
+				audience:    audience.(string),
+				lockTimeout: 3 * time.Minute,
 			}
 		} else {
 			msg := log.DebugMessage{
