@@ -5,8 +5,8 @@ go 1.19
 require (
 	github.com/aws/aws-sdk-go v1.44.256
 	github.com/cheggaaa/pb/v3 v3.1.4
-	github.com/golang/mock v1.6.0
 	github.com/google/go-cmp v0.6.0
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/iancoleman/strcase v0.0.0-20191112232945-16388991a334
 	github.com/igungor/gofakes3 v0.0.15
@@ -42,7 +42,6 @@ require (
 	github.com/shabbyrobe/gocovmerge v0.0.0-20190829150210-3e036491d500 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
-	golang.org/x/mod v0.11.0 // indirect
 	golang.org/x/sync v0.6.0 // indirect
 	golang.org/x/sys v0.18.0 // indirect
 	golang.org/x/tools v0.8.0 // indirect

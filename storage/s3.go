@@ -1455,6 +1455,15 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 //
 // Returns the HTTP response and any error encountered during the round trip.
 func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Add custom user agent for STS calls
+	isStsCall := req.URL.Host == "sts.googleapis.com"
+	if isStsCall {
+		// Use our useragent package to get the customized user agent
+		if customUserAgent, err := GetGoogleAuthUserAgent(); err == nil && customUserAgent != "" {
+			req.Header.Set("User-Agent", customUserAgent)
+		}
+	}
+
 	// TODO: Verify that all headers are written correctly from https://cloud.google.com/storage/docs/migrating
 	for key, values := range req.Header {
 		oldKey := key
@@ -1474,6 +1483,20 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 
 	token.SetAuthHeader(req)
 	return c.transport.RoundTrip(req)
+}
+
+// GetGoogleAuthUserAgent returns the user agent string for STS calls or error
+func GetGoogleAuthUserAgent() (string, error) {
+	// Import cycle not allowed, so we'll use package variable instead
+	return googleAuthUserAgent, nil
+}
+
+// Global variable to hold the user agent string
+var googleAuthUserAgent string
+
+// SetGoogleAuthUserAgent sets the user agent string to be used for STS calls
+func SetGoogleAuthUserAgent(ua string) {
+	googleAuthUserAgent = ua
 }
 
 // newSession initializes a new AWS session with region fallback and custom
@@ -1519,6 +1542,10 @@ func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.
 		httpClient = insecureHTTPClient
 	}
 	if opts.AuthGoogleADC {
+		// Set the Google auth user agent before creating the client
+		if customUserAgent, err := GetGoogleAuthUserAgent(); err == nil && customUserAgent != "" {
+			SetGoogleAuthUserAgent(customUserAgent) 
+		}
 		httpClient, err = newGoogleAuthenticationClient(ctx, httpClient)
 		if err != nil {
 			return nil, err

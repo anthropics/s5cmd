@@ -12,6 +12,7 @@ import (
 	"github.com/peak/s5cmd/v2/log/stat"
 	"github.com/peak/s5cmd/v2/parallel"
 	"github.com/peak/s5cmd/v2/storage"
+	"github.com/peak/s5cmd/v2/useragent"
 )
 
 const (
@@ -102,6 +103,16 @@ var app = &cli.App{
 		printJSON := c.Bool("json")
 		logLevel := c.String("log")
 		isStat := c.Bool("stat")
+
+		// Set the command name for the user agent
+		if c.Command.Name != "" {
+			useragent.SetCommand(c.Command.Name)
+		}
+
+		// Initialize the Google auth user agent
+		if ua := useragent.GetGoogleAuthUserAgent(); ua != "" {
+			storage.SetGoogleAuthUserAgent(ua)
+		}
 
 		log.Init(logLevel, printJSON)
 		parallel.Init(workerCount)
