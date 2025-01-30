@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -15,7 +14,6 @@ import (
 	"net/http"
 	urlpkg "net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,9 +33,6 @@ import (
 
 	"github.com/peak/s5cmd/v2/log"
 	"github.com/peak/s5cmd/v2/storage/url"
-	"github.com/rogpeppe/go-internal/lockedfile"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 )
 
 var sentinelURL = urlpkg.URL{}
@@ -915,9 +910,6 @@ func (s *S3) retryOnNoSuchUpload(ctx aws.Context, to *url.URL, input *s3manager.
 			break
 		}
 
-		msg := log.DebugMessage{Err: fmt.Sprintf("Retrying to upload %v upon error: %q", to, err.Error())}
-		log.Debug(msg)
-
 		_, err = s.uploader.UploadWithContext(ctx, input, uploaderOpts...)
 	}
 
@@ -1189,293 +1181,6 @@ type SessionCache struct {
 	sessions map[Options]*session.Session
 }
 
-type CachedTokenInfo struct {
-	Token    *oauth2.Token `json:"token"`
-	Audience string        `json:"audience"`
-}
-
-type FileCachedTokenSource struct {
-	underlying oauth2.TokenSource
-	cacheFile  string
-	audience   string
-}
-
-// ensureDirectoryExists creates the directory path for the cache file if it doesn't exist.
-// It uses os.MkdirAll to create all necessary parent directories with permissions set to 0700 (rwx------).
-//
-// Returns:
-//   - error: An error if the directory creation fails, or nil if successful.
-func (c *FileCachedTokenSource) ensureDirectoryExists() error {
-	dir := filepath.Dir(c.cacheFile)
-	return os.MkdirAll(dir, 0700)
-}
-
-// tokenCacheExists checks if the token cache file exists.
-//
-// Returns:
-//   - bool: True if the cache file exists, false otherwise.
-func (c *FileCachedTokenSource) tokenCacheExists() bool {
-	_, err := os.Stat(c.cacheFile)
-	return err == nil
-}
-
-// readTokenFromCache attempts to read and parse an OAuth2 token from the cache file.
-//
-// This function uses lockedfile.Read to safely read the contents of the cache file,
-// then unmarshals the JSON data into an oauth2.Token struct.
-//
-// Returns:
-//   - *oauth2.Token: The parsed OAuth2 token if successful
-//   - error: An error if reading or parsing the cache file fails
-func (c *FileCachedTokenSource) readTokenFromCache() (*CachedTokenInfo, error) {
-	msg := log.DebugMessage{
-		Operation: "FileCachedTokenSource.readTokenFromCache",
-		Err:       fmt.Sprintf("reading token from cache file %v", c.cacheFile),
-	}
-	log.Debug(msg)
-
-	if err := c.ensureDirectoryExists(); err != nil {
-		return nil, fmt.Errorf("failed to create cache directory: %v", err)
-	}
-
-	data, err := lockedfile.Read(c.cacheFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read cached token: %v", err)
-	}
-
-	var cachedInfo CachedTokenInfo
-	if err := json.Unmarshal(data, &cachedInfo); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal cached token info: %v", err)
-	}
-
-	return &cachedInfo, nil
-}
-
-// writeTokenToCache marshals the given OAuth2 token to JSON and writes it to the cache file.
-//
-// This function uses json.Marshal to convert the token to JSON format, then uses
-// lockedfile.Write to safely write the data to the cache file. The file permissions
-// are set to 0600 (read/write for owner only) for security.
-//
-// Parameters:
-//   - token: The OAuth2 token to be cached
-//
-// Returns:
-//   - error: An error if marshalling or writing to the cache file fails
-func (c *FileCachedTokenSource) writeTokenToCache(token *oauth2.Token) error {
-	msg := log.DebugMessage{
-		Operation: "FileCachedTokenSource.writeTokenToCache",
-		Err:       fmt.Sprintf("writing token to cache file %v", c.cacheFile),
-	}
-	log.Debug(msg)
-
-	if err := c.ensureDirectoryExists(); err != nil {
-		return fmt.Errorf("failed to create cache directory: %v", err)
-	}
-
-	cachedInfo := CachedTokenInfo{
-		Token:    token,
-		Audience: c.audience,
-	}
-
-	data, err := json.Marshal(cachedInfo)
-	if err != nil {
-		return fmt.Errorf("failed to marshal token: %v", err)
-	}
-
-	err = lockedfile.Write(c.cacheFile, bytes.NewReader(data), 0600)
-	if err != nil {
-		return fmt.Errorf("failed to write cached token: %v", err)
-	}
-
-	return nil
-}
-
-// Token returns an OAuth2 token from the cache if it's valid, or from the underlying
-// token source if not. It implements the oauth2.TokenSource interface.
-//
-// The function first attempts to read a token from the cache file. If successful
-// and the token is still valid, it returns this cached token. Otherwise, it
-// requests a new token from the underlying token source.
-//
-// If a new token is obtained, it's written to the cache file for future use.
-// The function also sets an expiry delta of 5 minutes to ensure the token
-// is refreshed slightly before its actual expiration time.
-//
-// Returns:
-//   - *oauth2.Token: The valid OAuth2 token
-//   - error: An error if token retrieval or caching fails
-func (c *FileCachedTokenSource) Token() (*oauth2.Token, error) {
-	if c.tokenCacheExists() {
-		cachedInfo, err := c.readTokenFromCache()
-		if err != nil {
-			// Log the error but don't fail
-			msg := log.ErrorMessage{
-				Command: "FileCachedTokenSource.Token",
-				Err:     fmt.Errorf("failed to read token from cache: %v", err).Error(),
-			}
-			log.Error(msg)
-		} else if cachedInfo.Audience != c.audience {
-			msg := log.DebugMessage{
-				Command: "FileCachedTokenSource.Token",
-				Err:     fmt.Sprintf("failed to read token from cache: audience mismatch\nCurrent audience: %v\nNew audience: %v", cachedInfo.Audience, c.audience),
-			}
-			log.Debug(msg)
-		} else if cachedInfo.Token.Valid() && time.Until(cachedInfo.Token.Expiry) >= 5*time.Minute {
-			return cachedInfo.Token, nil
-		} else {
-			msg := log.DebugMessage{
-				Command: "FileCachedTokenSource.Token",
-				Err:     fmt.Sprintf("cached token not usable: \nValid: %v\ntime until expiry: %v", cachedInfo.Token.Valid(), time.Until(cachedInfo.Token.Expiry)),
-			}
-			log.Debug(msg)
-		}
-	} else {
-		msg := log.DebugMessage{
-			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Sprintf("cached file doesn't exist, skipping trying to load from cache. Path: %v", c.cacheFile),
-		}
-		log.Debug(msg)
-	}
-
-	// If cache read fails or token is invalid, get a new token
-	token, err := c.underlying.Token()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get token from underlying source: %v", err)
-	}
-
-	// Cache the new token
-	if err := c.writeTokenToCache(token); err != nil {
-		// Log the error but don't fail
-		msg := log.ErrorMessage{
-			Command: "FileCachedTokenSource.Token",
-			Err:     fmt.Errorf("failed to cache token: %v", err).Error(),
-		}
-		log.Error(msg)
-	}
-
-	return token, nil
-}
-
-// createTokenSource creates an OAuth2 token source from the given Google credentials.
-// It wraps the token source with caching mechanisms to improve performance and reduce
-// the risk of rate limiting.
-//
-// Parameters:
-//   - creds: Google credentials used to create the base token source.
-//   - cacheFilePath: Path to the file where tokens will be cached.
-//
-// Returns:
-//   - oauth2.TokenSource: A token source that incorporates caching mechanisms.
-//   - error: An error if token source creation fails.
-func createTokenSource(creds *google.Credentials, cacheFilePath string) (oauth2.TokenSource, error) {
-	// Underlying token store uses ADC loaded creds. This is what actually talks to the WIF token exchange endpoint for e.g.
-	tokenSource := creds.TokenSource
-
-	// If this is WIF auth, then wrap that in a file cached token source, which will cache the token
-	// in a file and only request a new token if the cached token is invalid. This reduces calls to
-	// WIF token exchange endpoints, reducing risk of rate limiting.
-	if os.Getenv("S5CMD_FILE_CACHING_OPT_OUT") == "" {
-		// Determine if this is WIF auth, and if so use file caching
-		content := map[string]interface{}{}
-		json.Unmarshal(creds.JSON, &content)
-		audience := content["audience"]
-		if audience != nil {
-			tokenSource = &FileCachedTokenSource{
-				underlying: tokenSource,
-				cacheFile:  cacheFilePath,
-				audience:   audience.(string),
-			}
-		} else {
-			msg := log.DebugMessage{
-				Operation: "s3.newGoogleAuthenticationClient",
-				Err:       "No audience in creds, assuming no WIF token exchange endpoint and skipping cached auth",
-			}
-			log.Debug(msg)
-		}
-	}
-
-	// Finally, we wrap the file cached token source in an memory cache, reducing the
-	// number of calls to the file system, and which handles refreshing when needed.
-	return oauth2.ReuseTokenSourceWithExpiry(nil, tokenSource, time.Minute*5), nil
-}
-
-// GoogleAuthRoundTripper is a custom http.RoundTripper implementation that handles
-// authentication for Google Cloud Storage requests. It wraps an existing http.RoundTripper
-// and adds Google-specific authentication headers to each request using the provided
-// oauth2.TokenSource.
-type GoogleAuthRoundTripper struct {
-	tokenSource oauth2.TokenSource
-	transport   http.RoundTripper
-}
-
-func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client) (*http.Client, error) {
-	if baseClient == nil {
-		baseClient = http.DefaultClient
-	}
-	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
-	if err != nil {
-		msg := log.ErrorMessage{
-			Command: "google.FindDefaultCredentials",
-			Err:     "Could not load creds",
-		}
-		log.Error(msg)
-		return nil, err
-	}
-
-	tokenSource, err := createTokenSource(creds, filepath.Join(os.Getenv("HOME"), ".cache", "coo", "cached_s5cmd.json"))
-	if err != nil {
-		return nil, err
-	}
-
-	transport := baseClient.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-
-	return &http.Client{
-		Transport: &GoogleAuthRoundTripper{
-			transport:   transport,
-			tokenSource: tokenSource,
-		},
-	}, nil
-}
-
-// RoundTrip implements the http.RoundTripper interface.
-// It modifies the request headers to conform to Google Cloud Storage standards,
-// authenticates the request using the OAuth2 token source, and then performs the HTTP round trip.
-//
-// The function does the following:
-// 1. Converts Amazon S3 style headers (x-amz-*) to Google Cloud Storage style (x-goog-*).
-// 2. Removes 'gs://' prefixes from header values.
-// 3. Obtains an OAuth2 token and adds it to the request's Authorization header.
-// 4. Performs the actual HTTP round trip using the underlying transport.
-//
-// If there's an error obtaining the OAuth2 token, it logs the error but continues with the request.
-//
-// Returns the HTTP response and any error encountered during the round trip.
-func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	// TODO: Verify that all headers are written correctly from https://cloud.google.com/storage/docs/migrating
-	for key, values := range req.Header {
-		oldKey := key
-		newKey := strings.Replace(strings.ToLower(oldKey), "x-amz", "x-goog", -1)
-		for i := range values {
-			values[i] = strings.Replace(values[i], "gs%3A//", "", -1)
-		}
-		req.Header.Del(oldKey)
-		req.Header[newKey] = values
-	}
-
-	token, err := c.tokenSource.Token()
-	if err != nil {
-		// Note: this error should retry, given WIF credential issues are transient
-		return nil, fmt.Errorf("could not load Google auth token, error: %v", err)
-	}
-
-	token.SetAuthHeader(req)
-	return c.transport.RoundTrip(req)
-}
-
 // newSession initializes a new AWS session with region fallback and custom
 // options.
 func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.Session, error) {
@@ -1627,8 +1332,7 @@ func setSessionRegion(ctx context.Context, sess *session.Session, bucket string)
 	return nil
 }
 
-// customRetryer wraps the SDK's built in DefaultRetryer adding additional
-// error codes. Such as, retry for S3 InternalError code.
+// customRetryer provides S3-specific retry logic since token retries are handled by RetryTransport
 type customRetryer struct {
 	client.DefaultRetryer
 }
@@ -1641,26 +1345,15 @@ func newCustomRetryer(maxRetries int) *customRetryer {
 	}
 }
 
-// ShouldRetry overrides SDK's built in DefaultRetryer, adding custom retry
-// logics that are not included in the SDK.
 func (c *customRetryer) ShouldRetry(req *request.Request) bool {
-	shouldRetry := errHasCode(req.Error, "InternalError") || errHasCode(req.Error, "RequestTimeTooSkewed") || errHasCode(req.Error, "SlowDown") || strings.Contains(req.Error.Error(), "connection reset") || strings.Contains(req.Error.Error(), "connection timed out")
-	if !shouldRetry {
-		shouldRetry = c.DefaultRetryer.ShouldRetry(req)
-	}
-
-	// Errors related to tokens
-	if errHasCode(req.Error, "ExpiredToken") || errHasCode(req.Error, "ExpiredTokenException") || errHasCode(req.Error, "InvalidToken") {
-		return false
-	}
-
-	if shouldRetry && req.Error != nil {
-		err := fmt.Errorf("retryable error: %v", req.Error)
-		msg := log.DebugMessage{Err: err.Error()}
-		log.Debug(msg)
-	}
-
-	return shouldRetry
+	return c.DefaultRetryer.ShouldRetry(req) ||
+		errHasCode(req.Error, "InternalError") ||
+		errHasCode(req.Error, "RequestTimeTooSkewed") ||
+		errHasCode(req.Error, "SlowDown") ||
+		strings.Contains(req.Error.Error(), "connection reset") ||
+		strings.Contains(req.Error.Error(), "connection timed out") ||
+		strings.Contains(req.Error.Error(), "EOF") ||
+		strings.Contains(req.Error.Error(), "Internal Server Error")
 }
 
 var insecureHTTPClient = &http.Client{
