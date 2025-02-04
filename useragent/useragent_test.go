@@ -23,44 +23,33 @@ func contains(slice []string, str string) bool {
 
 func TestGetGoogleAuthUserAgent(t *testing.T) {
 	// Save original env vars to restore later
-	origPodName := os.Getenv("POD_NAME")
-	origNamespace := os.Getenv("POD_NAMESPACE")
-	origStatefulSet := os.Getenv("STATEFULSET_NAME")
-	origNodeName := os.Getenv("NODE_NAME")
+	origPodName := os.Getenv("COO_POD_NAME")
+	origNamespace := os.Getenv("COO_NAMESPACE")
+	origStatefulSet := os.Getenv("COO_STS_NAME")
 	defer func() {
-		os.Setenv("POD_NAME", origPodName)
-		os.Setenv("POD_NAMESPACE", origNamespace)
-		os.Setenv("STATEFULSET_NAME", origStatefulSet)
-		os.Setenv("NODE_NAME", origNodeName)
+		os.Setenv("COO_POD_NAME", origPodName)
+		os.Setenv("COO_NAMESPACE", origNamespace)
+		os.Setenv("COO_STS_NAME", origStatefulSet)
 	}()
 
 	// Clear environment variables
-	os.Unsetenv("POD_NAME")
-	os.Unsetenv("POD_NAMESPACE")
-	os.Unsetenv("STATEFULSET_NAME")
-	os.Unsetenv("NODE_NAME")
+	os.Unsetenv("COO_POD_NAME")
+	os.Unsetenv("COO_NAMESPACE")
+	os.Unsetenv("COO_STS_NAME")
 
-	// Test basic user agent without command or K8s info
+	// Test basic user agent without K8s info
 	ua := GetGoogleAuthUserAgent()
-	if !strings.HasPrefix(ua, "version:") {
-		t.Errorf("User agent should start with version:, got %s", ua)
+	if !strings.HasPrefix(ua, "s5cmd:") {
+		t.Errorf("User agent should start with s5cmd:, got %s", ua)
 	}
 	if !strings.Contains(ua, "invocation_id:") {
 		t.Errorf("User agent should contain invocation_id:, got %s", ua)
 	}
 
-	// Test with command
-	SetCommand("cp")
-	ua = GetGoogleAuthUserAgent()
-	if !strings.Contains(ua, "command:cp") {
-		t.Errorf("User agent should contain command:cp, got %s", ua)
-	}
-
 	// Test with K8s env vars
-	os.Setenv("POD_NAME", "test-pod")
-	os.Setenv("POD_NAMESPACE", "test-ns")
-	os.Setenv("STATEFULSET_NAME", "test-sts")
-	os.Setenv("NODE_NAME", "test-node")
+	os.Setenv("COO_POD_NAME", "test-pod")
+	os.Setenv("COO_NAMESPACE", "test-ns")
+	os.Setenv("COO_STS_NAME", "test-sts")
 
 	ua = GetGoogleAuthUserAgent()
 	// Get cache string and verify format
@@ -98,12 +87,16 @@ func TestGetGoogleAuthUserAgent(t *testing.T) {
 		t.Errorf("Invocation ID not found or invalid in UA: %s", ua)
 	}
 
+	// Check for expected version format
+	versionStr := strings.TrimPrefix(version.Version, "v")
+	if versionStr == "0.0.0" {
+		versionStr = version.GitCommit // Uses dev in test environment
+	}
+
 	expectedParts := []string{
-		"version:" + strings.TrimPrefix(version.Version, "v"),
-		"command:cp",
-		"pod:test-ns/test-pod",
+		fmt.Sprintf("s5cmd:%s", versionStr),
+		"pod:test-ns/test-pod", 
 		"statefulset:test-sts",
-		"node:test-node",
 		"cache_source:",
 		"cache_path:",
 		"cache_content:",
@@ -116,11 +109,11 @@ func TestGetGoogleAuthUserAgent(t *testing.T) {
 		}
 	}
 
-	// Test default namespace when POD_NAMESPACE is not set
-	os.Unsetenv("POD_NAMESPACE")
+	// Test default namespace when COO_NAMESPACE is not set
+	os.Unsetenv("COO_NAMESPACE")
 	ua = GetGoogleAuthUserAgent()
 	if !strings.Contains(ua, "pod:default/test-pod") {
-		t.Errorf("User agent should use default namespace when POD_NAMESPACE is not set, got %s", ua)
+		t.Errorf("User agent should use default namespace when COO_NAMESPACE is not set, got %s", ua)
 	}
 
 	// Test invocation ID uniqueness
@@ -135,11 +128,12 @@ func TestGetGoogleAuthUserAgent(t *testing.T) {
 	
 	// Since we can't set the package var directly, create a new user agent getter with a different ID
 	getNewAgent := func() string {
-		parts := []string{
-			fmt.Sprintf("version:%s", strings.TrimPrefix(version.Version, "v")),
+		versionStr := strings.TrimPrefix(version.Version, "v")
+		if versionStr == "0.0.0" {
+			versionStr = version.GitCommit
 		}
-		if command != "" {
-			parts = append(parts, fmt.Sprintf("command:%s", command))
+		parts := []string{
+			fmt.Sprintf("s5cmd:%s", versionStr),
 		}
 		parts = append(parts, fmt.Sprintf("invocation_id:%s", uuid.New().String()))
 		return strings.Join(parts, " ")

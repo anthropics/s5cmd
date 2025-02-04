@@ -104,11 +104,6 @@ var app = &cli.App{
 		logLevel := c.String("log")
 		isStat := c.Bool("stat")
 
-		// Set the command name for the user agent
-		if c.Command.Name != "" {
-			useragent.SetCommand(c.Command.Name)
-		}
-
 		// Initialize the Google auth user agent
 		if ua := useragent.GetGoogleAuthUserAgent(); ua != "" {
 			storage.SetUserAgent(ua)

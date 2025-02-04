@@ -14,16 +14,10 @@ import (
 
 var (
 	invocationID string
-	command      string
 )
 
 func init() {
 	invocationID = uuid.New().String()
-}
-
-// SetCommand sets the current command being executed
-func SetCommand(cmd string) {
-	command = cmd
 }
 
 // GetGoogleAuthUserAgent returns a detailed user agent string for Google STS calls
@@ -39,13 +33,9 @@ func GetGoogleAuthUserAgent() string {
 		fmt.Sprintf("s5cmd:%s", versionStr),
 	}
 
-	if command != "" {
-		parts = append(parts, fmt.Sprintf("command:%s", command))
-	}
-
 	// Kubernetes/COO information
 	if podName := os.Getenv("COO_POD_NAME"); podName != "" {
-		namespace := firstNonEmpty(os.Getenv("POD_NAMESPACE"), "default")
+		namespace := firstNonEmpty(os.Getenv("COO_NAMESPACE"), "default")
 		parts = append(parts, fmt.Sprintf("pod:%s/%s", namespace, podName))
 	}
 

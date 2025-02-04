@@ -35,7 +35,6 @@ type tokenManagerImpl struct {
 	audience  string
 	token     *oauth2.Token
 	mu        sync.RWMutex
-	cond      *sync.Cond // Condition variable for token readiness
 	client    *retryablehttp.Client
 }
 
@@ -97,22 +96,18 @@ func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager
 		audience:  audience,
 		client:    client,
 	}
-	m.cond = sync.NewCond(&m.mu) // Initialize condition variable with mutex
 
 	// Try to load initial token from cache
 	token, err := m.readTokenFromCache()
 	if err == nil && token != nil && token.Valid() && time.Until(token.Expiry) >= 5*time.Minute {
 		m.token = token
 	} else {
-		// No valid token from cache, refresh immediately
-		go func() {
-			if err := m.refresh(); err != nil {
-				log.Error(log.ErrorMessage{
-					Command: "TokenRefresh",
-					Err:     fmt.Sprintf("Failed to refresh token on startup: %v", err),
-				})
-			}
-		}()
+		if err := m.refresh(); err != nil {
+			log.Error(log.ErrorMessage{
+				Command: "TokenRefresh",
+				Err:     fmt.Sprintf("Failed to refresh token on startup: %v", err),
+			})
+		}
 	}
 
 	// Start refresh goroutine
@@ -132,8 +127,8 @@ func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
 		return nil, err
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	// Block until a valid token is available or context is canceled
 	for m.token == nil || !m.token.Valid() {
@@ -141,9 +136,6 @@ func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
 		if err := m.ctx.Err(); err != nil {
 			return nil, err
 		}
-
-		// Wait for signal that token has been refreshed
-		m.cond.Wait()
 	}
 
 	return m.token, nil
@@ -158,16 +150,15 @@ func (m *tokenManagerImpl) refresh() error {
 		ts:  m.creds.TokenSource,
 	}, time.Minute*5)
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	token, err := tokenSource.Token()
 	if err != nil {
 		return err
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.token = token
-	m.cond.Broadcast() // Signal that token is ready
 
 	// Update file cache - always synchronous
 	return m.writeTokenToCache(token)

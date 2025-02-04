@@ -15,7 +15,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/peak/s5cmd/v2/parallel"
-	"github.com/peak/s5cmd/v2/useragent"
 )
 
 var runHelpTemplate = `Name:
@@ -130,9 +129,6 @@ func (r Run) Run(ctx context.Context) error {
 
 		fn := func() error {
 			subcmd := fields[0]
-
-			// Set the command name for the user agent in batch mode
-			useragent.SetCommand(subcmd)
 
 			cmd := AppCommand(subcmd)
 			if cmd == nil {

@@ -129,7 +129,7 @@ func TestTokenManagerImpl(t *testing.T) {
 	})
 
 	t.Run("Token refresh before expiry", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
 		// Create test credentials for token tests
@@ -140,16 +140,20 @@ func TestTokenManagerImpl(t *testing.T) {
 		defer manager.Stop()
 
 		// Force the token to be expired
-		impl := manager.(*tokenManagerImpl) 
-		impl.mu.Lock()
+		impl := manager.(*tokenManagerImpl)
 		impl.token = &oauth2.Token{
 			AccessToken: "original-token",
 			TokenType:   "Bearer",
 			Expiry:      time.Now().Add(-1 * time.Minute),
 		}
-		impl.mu.Unlock()
 
-		// Get token - should trigger refresh
+		// Call refresh synchronously before releasing lock
+		err = impl.refresh()
+		if err != nil {
+			t.Fatalf("Token refresh failed: %v", err)
+		}
+
+		// Get token - should be the refreshed token
 		newToken, err := manager.GetToken()
 		if err != nil {
 			t.Fatalf("GetToken failed: %v", err)
@@ -206,7 +210,7 @@ func TestTokenManagerImpl(t *testing.T) {
 		cacheFile := filepath.Join(tempDir, ".cache", "coo", "cached_s5cmd.json")
 
 		// Make sure cache file is cleared before test
-		os.Remove(cacheFile) 
+		os.Remove(cacheFile)
 
 		// Get token to potentially trigger cache
 		_, err = manager.GetToken()
