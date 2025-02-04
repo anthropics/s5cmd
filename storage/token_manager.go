@@ -273,7 +273,6 @@ type GoogleAuthRoundTripper struct {
 
 // RoundTrip implements the http.RoundTripper interface.
 func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Always set our custom user agent for all calls
 	req.Header.Set("User-Agent", useragent.GetGoogleAuthUserAgent())
 
 	// Convert headers for all GCS calls
