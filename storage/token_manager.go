@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -130,27 +131,76 @@ func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
 	return m.token, nil
 }
 
-// refresh gets a new token and updates both memory and file cache
+// refresh gets a new token and updates both memory and file cache while holding lock
 func (m *tokenManagerImpl) refresh() error {
-	ctx := context.WithValue(m.ctx, oauth2.HTTPClient, m.client.StandardClient())
+	if err := m.ensureDirectoryExists(); err != nil {
+		return fmt.Errorf("failed to create cache directory: %v", err)
+	}
 
+	// Hold lock throughout refresh process
+	file, err := lockedfile.OpenFile(m.cacheFile, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to get lock: %v", err)
+	}
+	defer file.Close()
+
+	// First check if someone else already refreshed while we were waiting
+	data, err := io.ReadAll(file)
+	if err == nil && len(data) > 0 {
+		var cachedInfo CachedTokenInfo
+		if json.Unmarshal(data, &cachedInfo) == nil &&
+			cachedInfo.Audience == m.audience &&
+			cachedInfo.Token != nil &&
+			cachedInfo.Token.Valid() &&
+			time.Until(cachedInfo.Token.Expiry) > 5*time.Minute {
+			// Use token that was refreshed by another process
+			m.mu.Lock()
+			m.token = cachedInfo.Token
+			m.mu.Unlock()
+			return nil
+		}
+	}
+
+	// Get new token while holding lock
+	ctx := context.WithValue(m.ctx, oauth2.HTTPClient, m.client.StandardClient())
 	tokenSource := oauth2.ReuseTokenSourceWithExpiry(nil, &contextTokenSource{
 		ctx: ctx,
 		ts:  m.creds.TokenSource,
 	}, time.Minute*5)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	token, err := tokenSource.Token()
+	newToken, err := tokenSource.Token()
 	if err != nil {
 		return err
 	}
 
-	m.token = token
+	// Update memory
+	m.mu.Lock()
+	m.token = newToken
+	m.mu.Unlock()
 
-	// Update file cache - always synchronous
-	return m.writeTokenToCache(token)
+	// Write new token while still holding lock
+	cachedInfo := CachedTokenInfo{
+		Token:    newToken,
+		Audience: m.audience,
+	}
+
+	newData, err := json.Marshal(cachedInfo)
+	if err != nil {
+		return fmt.Errorf("failed to marshal token: %v", err)
+	}
+
+	// Truncate and write file
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		return err
+	}
+	if _, err := file.Write(newData); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (m *tokenManagerImpl) refreshLoop() {
