@@ -13,12 +13,8 @@ import (
 )
 
 var (
-	invocationID string
-)
-
-func init() {
 	invocationID = uuid.New().String()
-}
+)
 
 // GetGoogleAuthUserAgent returns a detailed user agent string for Google STS calls
 func GetGoogleAuthUserAgent() string {

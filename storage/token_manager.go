@@ -15,6 +15,7 @@ import (
 
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/peak/s5cmd/v2/log"
+	"github.com/peak/s5cmd/v2/useragent"
 	"github.com/rogpeppe/go-internal/lockedfile"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -40,18 +41,6 @@ type tokenManagerImpl struct {
 
 // For testing - can be replaced in tests
 var findDefaultCredentials = google.FindDefaultCredentials
-
-// SetUserAgent sets the user agent string for Google authentication requests
-func SetUserAgent(ua string) {
-	globalUserAgent = ua
-}
-
-// GetUserAgent returns the user agent string for Google authentication requests
-func GetUserAgent() string {
-	return globalUserAgent
-}
-
-var globalUserAgent string
 
 // NewTokenManager creates a new token manager and starts its refresh goroutine.
 func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager, error) {
@@ -280,15 +269,12 @@ func (c *contextTokenSource) Token() (*oauth2.Token, error) {
 type GoogleAuthRoundTripper struct {
 	tokenManager TokenManager
 	transport    http.RoundTripper
-	userAgent    string
 }
 
 // RoundTrip implements the http.RoundTripper interface.
 func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Always set our custom user agent for all calls
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
-	}
+	req.Header.Set("User-Agent", useragent.GetGoogleAuthUserAgent())
 
 	// Convert headers for all GCS calls
 	for key, values := range req.Header {
@@ -363,7 +349,6 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 	authTransport := &GoogleAuthRoundTripper{
 		transport:    baseTransport,
 		tokenManager: tokenManager,
-		userAgent:    globalUserAgent,
 	}
 
 	// Create final client with auth transport
