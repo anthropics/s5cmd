@@ -51,10 +51,9 @@ func TestGetGoogleAuthUserAgent(t *testing.T) {
 	os.Setenv("COO_NAMESPACE", "test-ns")
 	os.Setenv("COO_STS_NAME", "test-sts")
 
-	ua = GetGoogleAuthUserAgent()
 	// Get cache string and verify format
 	ua = GetGoogleAuthUserAgent()
-	
+
 	// Extract and verify source
 	source := regexp.MustCompile(`cache_source:(\w+)`).FindStringSubmatch(ua)
 	if source == nil {
@@ -95,7 +94,7 @@ func TestGetGoogleAuthUserAgent(t *testing.T) {
 
 	expectedParts := []string{
 		fmt.Sprintf("s5cmd:%s", versionStr),
-		"pod:test-ns/test-pod", 
+		"pod:test-ns/test-pod",
 		"statefulset:test-sts",
 		"cache_source:",
 		"cache_path:",
@@ -118,14 +117,14 @@ func TestGetGoogleAuthUserAgent(t *testing.T) {
 
 	// Test invocation ID uniqueness
 	ua1 := GetGoogleAuthUserAgent()
-	
+
 	// Get current ID from ua1
 	id1 := regexp.MustCompile(`invocation_id:([a-f0-9-]+)`).FindStringSubmatch(ua1)
 	if id1 == nil {
 		t.Errorf("Could not extract first invocation ID")
 		return
 	}
-	
+
 	// Since we can't set the package var directly, create a new user agent getter with a different ID
 	getNewAgent := func() string {
 		versionStr := strings.TrimPrefix(version.Version, "v")
