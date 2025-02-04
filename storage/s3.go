@@ -1347,8 +1347,9 @@ func newCustomRetryer(maxRetries int) *customRetryer {
 
 func (c *customRetryer) ShouldRetry(req *request.Request) bool {
 	// Don't retry expired tokens
-	if errHasCode(req.Error, "ExpiredToken") || 
-           errHasCode(req.Error, "ExpiredTokenException") {
+	if errHasCode(req.Error, "ExpiredToken") ||
+		errHasCode(req.Error, "ExpiredTokenException") ||
+		errHasCode(req.Error, "InvalidToken") {
 		return false
 	}
 	return c.DefaultRetryer.ShouldRetry(req) ||

@@ -1277,8 +1277,6 @@ func TestAWSLogLevel(t *testing.T) {
 	}
 }
 
-
-
 func valueAtPath(i interface{}, s string) interface{} {
 	v, err := awsutil.ValuesAtPath(i, s)
 	if err != nil || len(v) == 0 {

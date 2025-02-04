@@ -18,11 +18,11 @@ import (
 
 // mockTokenManager simulates a TokenManager that can fail a number of times
 type mockTokenManager struct {
-	failures    int
-	remaining   int
-	token       *oauth2.Token
-	t           *testing.T
-	errorType   string // can be "network", "oauth", or empty
+	failures  int
+	remaining int
+	token     *oauth2.Token
+	t         *testing.T
+	errorType string // can be "network", "oauth", or empty
 }
 
 func newMockTokenManager(t *testing.T, failures int, errorType string) TokenManager {
