@@ -1332,7 +1332,8 @@ func setSessionRegion(ctx context.Context, sess *session.Session, bucket string)
 	return nil
 }
 
-// customRetryer provides S3-specific retry logic since token retries are handled by RetryTransport
+// customRetryer wraps the SDK's built in DefaultRetryer adding additional
+// error codes. Such as, retry for S3 InternalError code.
 type customRetryer struct {
 	client.DefaultRetryer
 }
@@ -1345,21 +1346,26 @@ func newCustomRetryer(maxRetries int) *customRetryer {
 	}
 }
 
+// ShouldRetry overrides SDK's built in DefaultRetryer, adding custom retry
+// logics that are not included in the SDK.
 func (c *customRetryer) ShouldRetry(req *request.Request) bool {
-	// Don't retry expired tokens
-	if errHasCode(req.Error, "ExpiredToken") ||
-		errHasCode(req.Error, "ExpiredTokenException") ||
-		errHasCode(req.Error, "InvalidToken") {
+	shouldRetry := errHasCode(req.Error, "InternalError") || errHasCode(req.Error, "RequestTimeTooSkewed") || errHasCode(req.Error, "SlowDown") || strings.Contains(req.Error.Error(), "connection reset") || strings.Contains(req.Error.Error(), "connection timed out")
+	if !shouldRetry {
+		shouldRetry = c.DefaultRetryer.ShouldRetry(req)
+	}
+
+	// Errors related to tokens
+	if errHasCode(req.Error, "ExpiredToken") || errHasCode(req.Error, "ExpiredTokenException") || errHasCode(req.Error, "InvalidToken") {
 		return false
 	}
-	return c.DefaultRetryer.ShouldRetry(req) ||
-		errHasCode(req.Error, "InternalError") ||
-		errHasCode(req.Error, "RequestTimeTooSkewed") ||
-		errHasCode(req.Error, "SlowDown") ||
-		strings.Contains(req.Error.Error(), "connection reset") ||
-		strings.Contains(req.Error.Error(), "connection timed out") ||
-		strings.Contains(req.Error.Error(), "EOF") ||
-		strings.Contains(req.Error.Error(), "Internal Server Error")
+
+	if shouldRetry && req.Error != nil {
+		err := fmt.Errorf("retryable error: %v", req.Error)
+		msg := log.DebugMessage{Err: err.Error()}
+		log.Debug(msg)
+	}
+
+	return shouldRetry
 }
 
 var insecureHTTPClient = &http.Client{
