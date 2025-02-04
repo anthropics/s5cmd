@@ -43,6 +43,16 @@ type tokenManagerImpl struct {
 // For testing - can be replaced in tests
 var findDefaultCredentials = google.FindDefaultCredentials
 
+// userAgentTransport adds the user agent to all requests
+type userAgentTransport struct {
+	base http.RoundTripper
+}
+
+func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Set("User-Agent", useragent.GetGoogleAuthUserAgent())
+	return t.base.RoundTrip(req)
+}
+
 // NewTokenManager creates a new token manager and starts its refresh goroutine.
 func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager, error) {
 	// Create retry client for token operations with simplified settings
@@ -57,6 +67,15 @@ func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager
 	// Use baseClient's transport if provided
 	if baseClient != nil {
 		client.HTTPClient = baseClient
+	}
+
+	// Add user agent transport
+	baseTransport := client.HTTPClient.Transport
+	if baseTransport == nil {
+		baseTransport = http.DefaultTransport
+	}
+	client.HTTPClient.Transport = &userAgentTransport{
+		base: baseTransport,
 	}
 
 	// Get credentials using the retry client
@@ -323,8 +342,6 @@ type GoogleAuthRoundTripper struct {
 
 // RoundTrip implements the http.RoundTripper interface.
 func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.Header.Set("User-Agent", useragent.GetGoogleAuthUserAgent())
-
 	// Convert headers for all GCS calls
 	for key, values := range req.Header {
 		oldKey := key
