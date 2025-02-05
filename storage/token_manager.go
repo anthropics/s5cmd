@@ -285,34 +285,6 @@ func (m *tokenManagerImpl) readTokenFromCache() (*oauth2.Token, error) {
 	return cachedInfo.Token, nil
 }
 
-// writeTokenToCache marshals the given OAuth2 token to JSON and writes it to the cache file.
-func (m *tokenManagerImpl) writeTokenToCache(token *oauth2.Token) error {
-	if m.cacheFile == "" || os.Getenv("S5CMD_FILE_CACHING_OPT_OUT") != "" {
-		return nil
-	}
-
-	if err := m.ensureDirectoryExists(); err != nil {
-		return fmt.Errorf("failed to create cache directory: %v", err)
-	}
-
-	cachedInfo := CachedTokenInfo{
-		Token:    token,
-		Audience: m.audience,
-	}
-
-	data, err := json.Marshal(cachedInfo)
-	if err != nil {
-		return fmt.Errorf("failed to marshal token: %v", err)
-	}
-
-	err = lockedfile.Write(m.cacheFile, bytes.NewReader(data), 0600)
-	if err != nil {
-		return fmt.Errorf("failed to write cached token: %v", err)
-	}
-
-	return nil
-}
-
 // CachedTokenInfo holds token data and metadata for caching
 type CachedTokenInfo struct {
 	Token    *oauth2.Token `json:"token"`
