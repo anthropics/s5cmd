@@ -21,6 +21,11 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+const (
+	expiryGrace     = 5 * time.Minute
+	refreshLoopWait = 30 * time.Second
+)
+
 // TokenManager is the interface for token management
 type TokenManager interface {
 	GetToken() (*oauth2.Token, error)
@@ -226,13 +231,13 @@ func (m *tokenManagerImpl) refreshLoop() {
 		select {
 		case <-m.ctx.Done():
 			return
-		case <-time.After(5 * time.Second): // Fixed refresh interval
+		case <-time.After(refreshLoopWait): // Fixed refresh interval
 			m.mu.RLock()
 			token := m.token
 			m.mu.RUnlock()
 
 			// Skip refresh if token is still valid and not expiring soon
-			if token != nil && token.Valid() && time.Until(token.Expiry) > 5*time.Minute {
+			if token != nil && token.Valid() && time.Until(token.Expiry) > expiryGrace {
 				continue
 			}
 

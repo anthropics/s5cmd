@@ -44,18 +44,25 @@ func GetGoogleAuthUserAgent() string {
 	}
 
 	// Cache information - as separate fields
-	source, pathHash, contentHash, status := getCacheInfo()
-	parts = append(parts, fmt.Sprintf("cache_source:%s", source))
-	parts = append(parts, fmt.Sprintf("cache_path:%s", pathHash))
-	parts = append(parts, fmt.Sprintf("cache_content:%s", contentHash))
-	parts = append(parts, fmt.Sprintf("cache_status:%s", status))
+	cacheInfo := getCacheInfo()
+	parts = append(parts, fmt.Sprintf("cache_source:%s", cacheInfo.Source))
+	parts = append(parts, fmt.Sprintf("cache_path:%s", cacheInfo.PathHash))
+	parts = append(parts, fmt.Sprintf("cache_content:%s", cacheInfo.ContentHash))
+	parts = append(parts, fmt.Sprintf("cache_status:%s", cacheInfo.Status))
 
 	parts = append(parts, fmt.Sprintf("invocation_id:%s", invocationID))
 
 	return strings.Join(parts, " ")
 }
 
-// getCacheInfo returns cache location source and status
+// CacheInfo holds information about the cache configuration and status
+type CacheInfo struct {
+	Source      string // Source of cache path configuration
+	PathHash    string // Hash of the cache path
+	ContentHash string // Hash of the cache content
+	Status      string // Status of the cache (writable/readonly/disabled)
+}
+
 // firstNonEmpty returns the first non-empty string from the provided values
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
@@ -66,7 +73,17 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func getCacheInfo() (string, string, string, string) {
+func getCacheInfo() CacheInfo {
+	// Check if caching is opted out
+	if os.Getenv("S5CMD_FILE_CACHING_OPT_OUT") == "true" {
+		return CacheInfo{
+			Source:      "OPT_OUT",
+			PathHash:    "none",
+			ContentHash: "none",
+			Status:      "disabled",
+		}
+	}
+
 	var cachePath string
 	var source string
 
@@ -116,5 +133,10 @@ func getCacheInfo() (string, string, string, string) {
 		}
 	}
 
-	return source, pathHash, contentHash, status
+	return CacheInfo{
+		Source:      source,
+		PathHash:    pathHash,
+		ContentHash: contentHash,
+		Status:      status,
+	}
 }
