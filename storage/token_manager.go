@@ -157,10 +157,6 @@ func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
 		case <-m.ctx.Done():
 			return nil, m.ctx.Err()
 		case <-m.updates:
-			// Check context again after waiting
-			if err := m.ctx.Err(); err != nil {
-				return nil, err
-			}
 			continue
 		}
 	}
