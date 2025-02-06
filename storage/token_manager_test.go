@@ -192,6 +192,36 @@ func TestTokenManagerImpl(t *testing.T) {
 		}
 	})
 
+	t.Run("GetToken respects context cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		manager, err := NewTokenManager(ctx, nil)
+		if err != nil {
+			t.Fatalf("Failed to create token manager: %v", err)
+		}
+		defer manager.Stop()
+
+		// Force token to be invalid
+		impl := manager.(*tokenManagerImpl)
+		impl.token = nil
+
+		// Create a goroutine to cancel context after a short delay
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			cancel()
+		}()
+
+		// Try to get token - should fail due to context cancellation
+		_, err = manager.GetToken()
+		if err == nil {
+			t.Error("Expected error due to context cancellation")
+		}
+		if err != context.Canceled {
+			t.Errorf("Expected context.Canceled, got %v", err)
+		}
+	})
+
 	t.Run("Respects cache opt-out", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()

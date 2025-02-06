@@ -41,6 +41,7 @@ type tokenManagerImpl struct {
 	audience  string
 	token     *oauth2.Token
 	mu        sync.RWMutex
+	updates   chan struct{}      // Channel for token update notifications
 	client    *retryablehttp.Client
 }
 
@@ -108,6 +109,7 @@ func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager
 		cacheFile: cacheFile,
 		audience:  audience,
 		client:    client,
+		updates:   make(chan struct{}, 1),
 	}
 
 	// Try to load initial token from cache
@@ -133,25 +135,26 @@ func (m *tokenManagerImpl) Stop() {
 	m.cancel()
 }
 
-// GetToken returns the current token or blocks until one is available
+// GetToken returns the current token or blocks until one is available or context is canceled
 func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
-	// Check context first
-	if err := m.ctx.Err(); err != nil {
-		return nil, err
-	}
+	for {
+		// Quick check with read lock
+		m.mu.RLock()
+		if m.token != nil && m.token.Valid() {
+			token := m.token
+			m.mu.RUnlock()
+			return token, nil
+		}
+		m.mu.RUnlock()
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	// Block until a valid token is available or context is canceled
-	for m.token == nil || !m.token.Valid() {
-		// Check context before waiting
-		if err := m.ctx.Err(); err != nil {
-			return nil, err
+		// Wait for update or context cancellation
+		select {
+		case <-m.ctx.Done():
+			return nil, m.ctx.Err()
+		case <-m.updates:
+			continue
 		}
 	}
-
-	return m.token, nil
 }
 
 // refresh gets a new token and updates both memory and file cache while holding lock
@@ -196,10 +199,17 @@ func (m *tokenManagerImpl) refresh() error {
 		return err
 	}
 
-	// Update memory
+	// Update memory and notify waiters
 	m.mu.Lock()
 	m.token = newToken
 	m.mu.Unlock()
+	
+	// Notify waiters of new token
+	select {
+	case m.updates <- struct{}{}:
+	default:
+		// Channel full or no waiters, that's OK
+	}
 
 	// Write new token while still holding lock
 	cachedInfo := CachedTokenInfo{
