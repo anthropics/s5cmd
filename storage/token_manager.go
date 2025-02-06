@@ -41,7 +41,7 @@ type tokenManagerImpl struct {
 	audience  string
 	token     *oauth2.Token
 	mu        sync.RWMutex
-	updates   chan struct{}      // Channel for token update notifications
+	updates   chan struct{} // Channel for token update notifications
 	client    *retryablehttp.Client
 }
 
@@ -137,6 +137,11 @@ func (m *tokenManagerImpl) Stop() {
 
 // GetToken returns the current token or blocks until one is available or context is canceled
 func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
+	// Always check context first
+	if err := m.ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	for {
 		// Quick check with read lock
 		m.mu.RLock()
@@ -152,6 +157,10 @@ func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
 		case <-m.ctx.Done():
 			return nil, m.ctx.Err()
 		case <-m.updates:
+			// Check context again after waiting
+			if err := m.ctx.Err(); err != nil {
+				return nil, err
+			}
 			continue
 		}
 	}
@@ -203,7 +212,7 @@ func (m *tokenManagerImpl) refresh() error {
 	m.mu.Lock()
 	m.token = newToken
 	m.mu.Unlock()
-	
+
 	// Notify waiters of new token
 	select {
 	case m.updates <- struct{}{}:
