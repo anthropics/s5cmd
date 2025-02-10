@@ -58,10 +58,56 @@ func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return t.base.RoundTrip(req)
 }
 
+// simpleMessage implements log.Message interface just passing through the message string
+type simpleMessage struct {
+	msg string
+}
+
+func (m *simpleMessage) String() string { return m.msg }
+func (m *simpleMessage) JSON() string   { return fmt.Sprintf(`{"message":%q}`, m.msg) }
+
+// leveledLogger adapts s5cmd's logging system to retryablehttp's LeveledLogger interface
+type leveledLogger struct{}
+
+func (l *leveledLogger) Error(msg string, keysAndValues ...interface{}) {
+	log.Error(&simpleMessage{formatMessage(msg, keysAndValues...)})
+}
+
+func (l *leveledLogger) Info(msg string, keysAndValues ...interface{}) {
+	log.Info(&simpleMessage{formatMessage(msg, keysAndValues...)})
+}
+
+func (l *leveledLogger) Debug(msg string, keysAndValues ...interface{}) {
+	log.Debug(&simpleMessage{formatMessage(msg, keysAndValues...)})
+}
+
+func (l *leveledLogger) Warn(msg string, keysAndValues ...interface{}) {
+	log.Warn(&simpleMessage{formatMessage(msg, keysAndValues...)})
+}
+
+// formatMessage formats a message with its key-value pairs
+func formatMessage(msg string, keysAndValues ...interface{}) string {
+	if len(keysAndValues) == 0 {
+		return msg
+	}
+
+	var pairs []string
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key := fmt.Sprint(keysAndValues[i])
+		value := "<?>"
+		if i+1 < len(keysAndValues) {
+			value = fmt.Sprint(keysAndValues[i+1])
+		}
+		pairs = append(pairs, fmt.Sprintf("%s=%s", key, value))
+	}
+	return fmt.Sprintf("%s {%s}", msg, strings.Join(pairs, " "))
+}
+
 // NewTokenManager creates a new token manager and starts its refresh goroutine.
 func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager, error) {
 	// Create retry client for token operations with simplified settings
 	client := retryablehttp.NewClient()
+	client.Logger = &leveledLogger{} // Use our leveled logger adapter
 
 	// Retries up to ~30m assuming timeouts on each attempt.
 	client.RetryMax = 15

@@ -76,6 +76,26 @@ type DebugMessage struct {
 	Err       string `json:"error"`
 }
 
+// WarnMessage is a generic message structure for warning messages.
+type WarnMessage struct {
+	Operation string `json:"operation,omitempty"`
+	Command   string `json:"job,omitempty"`
+	Message   string `json:"message"`
+}
+
+// String is the string representation of WarnMessage.
+func (w WarnMessage) String() string {
+	if w.Command == "" {
+		return w.Message
+	}
+	return fmt.Sprintf("%q: %v", w.Command, w.Message)
+}
+
+// JSON is the JSON representation of WarnMessage.
+func (w WarnMessage) JSON() string {
+	return strutil.JSON(w)
+}
+
 type TraceMessage struct {
 	Message string `json:"message"`
 }

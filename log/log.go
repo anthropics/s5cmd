@@ -43,6 +43,11 @@ func Stat(msg Message) {
 	global.printfHelper(LevelInfo, msg, os.Stdout)
 }
 
+// Warn prints message in warn mode.
+func Warn(msg Message) {
+	global.printf(LevelWarn, msg, os.Stdout)
+}
+
 // Error prints message in error mode.
 func Error(msg Message) {
 	global.printf(LevelError, msg, os.Stderr)
@@ -113,6 +118,7 @@ const (
 	LevelTrace LogLevel = iota
 	LevelDebug
 	LevelInfo
+	LevelWarn
 	LevelError
 )
 
@@ -123,6 +129,8 @@ func (l LogLevel) String() string {
 		return ""
 	case LevelError:
 		return "ERROR "
+	case LevelWarn:
+		return "WARN "
 	case LevelDebug:
 		return "DEBUG "
 	case LevelTrace:
@@ -144,6 +152,8 @@ func LevelFromString(s string) LogLevel {
 		return LevelDebug
 	case "info":
 		return LevelInfo
+	case "warn":
+		return LevelWarn
 	case "error":
 		return LevelError
 	case "trace":
