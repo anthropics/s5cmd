@@ -95,6 +95,10 @@ var app = &cli.App{
 			Name:  "auth-google-adc",
 			Usage: "inject the authorization bearer token as a request header using Google Application Default Credentials. Set automatically if a file URI starts with gs:// and no endpoint is set",
 		},
+		&cli.BoolFlag{
+			Name:  "retry-on-forbidden",
+			Usage: "retry for Forbidden error code",
+		},
 	},
 	Before: func(c *cli.Context) error {
 		retryCount := c.Int("retry-count")
@@ -240,6 +244,7 @@ func NewStorageOpts(c *cli.Context) storage.Options {
 		LogLevel:               log.LevelFromString(c.String("log")),
 		NoSuchUploadRetryCount: c.Int("no-such-upload-retry-count"),
 		AuthGoogleADC:          c.Bool("auth-google-adc"),
+		RetryForbidden:         c.Bool("retry-on-forbidden"),
 	}
 }
 
