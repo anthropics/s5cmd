@@ -1247,7 +1247,7 @@ func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.
 			WithLogger(sdkLogger{})
 	}
 
-	awsCfg.Retryer = newCustomRetryer(opts.MaxRetries)
+	awsCfg.Retryer = newCustomRetryer(opts.MaxRetries, opts.RetryForbidden)
 
 	useSharedConfig := session.SharedConfigEnable
 	{
@@ -1336,20 +1336,28 @@ func setSessionRegion(ctx context.Context, sess *session.Session, bucket string)
 // error codes. Such as, retry for S3 InternalError code.
 type customRetryer struct {
 	client.DefaultRetryer
+	retryForbidden bool
 }
 
-func newCustomRetryer(maxRetries int) *customRetryer {
+func newCustomRetryer(maxRetries int, retryForbidden bool) *customRetryer {
 	return &customRetryer{
 		DefaultRetryer: client.DefaultRetryer{
 			NumMaxRetries: maxRetries,
 		},
+		retryForbidden: retryForbidden,
 	}
 }
 
 // ShouldRetry overrides SDK's built in DefaultRetryer, adding custom retry
 // logics that are not included in the SDK.
 func (c *customRetryer) ShouldRetry(req *request.Request) bool {
-	shouldRetry := errHasCode(req.Error, "InternalError") || errHasCode(req.Error, "RequestTimeTooSkewed") || errHasCode(req.Error, "SlowDown") || strings.Contains(req.Error.Error(), "connection reset") || strings.Contains(req.Error.Error(), "connection timed out")
+	shouldRetry := errHasCode(req.Error, "InternalError") ||
+		errHasCode(req.Error, "RequestTimeTooSkewed") ||
+		errHasCode(req.Error, "SlowDown") ||
+		strings.Contains(req.Error.Error(), "connection reset") ||
+		strings.Contains(req.Error.Error(), "connection timed out") ||
+		(c.retryForbidden && (errHasCode(req.Error, "Forbidden") || errHasCode(req.Error, "AccessDenied")))
+
 	if !shouldRetry {
 		shouldRetry = c.DefaultRetryer.ShouldRetry(req)
 	}

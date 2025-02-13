@@ -396,9 +396,10 @@ func TestS3Retry(t *testing.T) {
 	log.Init("debug", false)
 
 	testcases := []struct {
-		name          string
-		err           error
-		expectedRetry int
+		name           string
+		err            error
+		expectedRetry  int
+		retryForbidden bool
 	}{
 		// Internal error
 		{
@@ -520,6 +521,31 @@ func TestS3Retry(t *testing.T) {
 			err:           fmt.Errorf("broken pipe"),
 			expectedRetry: 5,
 		},
+		// Forbidden Errors
+		{
+			name:           "Forbidden: should not retry",
+			err:            awserr.New("Forbidden", "Forbidden", nil),
+			expectedRetry:  0,
+			retryForbidden: false,
+		},
+		{
+			name:           "Forbidden: should retry",
+			err:            awserr.New("Forbidden", "Forbidden", nil),
+			expectedRetry:  5,
+			retryForbidden: true,
+		},
+		{
+			name:           "AccessDenied: should not retry",
+			err:            awserr.New("AccessDenied", "AccessDenied", nil),
+			expectedRetry:  0,
+			retryForbidden: false,
+		},
+		{
+			name:           "AccessDenied: should retry",
+			err:            awserr.New("AccessDenied", "AccessDenied", nil),
+			expectedRetry:  5,
+			retryForbidden: true,
+		},
 
 		// Unknown errors
 		{
@@ -539,7 +565,7 @@ func TestS3Retry(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			sess := unit.Session
-			sess.Config.Retryer = newCustomRetryer(expectedRetry)
+			sess.Config.Retryer = newCustomRetryer(expectedRetry, tc.retryForbidden)
 
 			mockAPI := s3.New(sess)
 			mockS3 := &S3{
