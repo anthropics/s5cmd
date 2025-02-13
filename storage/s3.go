@@ -1349,13 +1349,32 @@ func newCustomRetryer(maxRetries int) *customRetryer {
 // ShouldRetry overrides SDK's built in DefaultRetryer, adding custom retry
 // logics that are not included in the SDK.
 func (c *customRetryer) ShouldRetry(req *request.Request) bool {
-	shouldRetry := errHasCode(req.Error, "InternalError") || errHasCode(req.Error, "RequestTimeTooSkewed") || errHasCode(req.Error, "SlowDown") || strings.Contains(req.Error.Error(), "connection reset") || strings.Contains(req.Error.Error(), "connection timed out")
+	// Check for specific S3 service errors that should be retried
+	shouldRetry := errHasCode(req.Error, "InternalError") || 
+		errHasCode(req.Error, "RequestTimeTooSkewed") || 
+		errHasCode(req.Error, "SlowDown") || 
+		strings.Contains(req.Error.Error(), "connection reset") || 
+		strings.Contains(req.Error.Error(), "connection timed out")
+	
+	// Special cases for 403 Forbidden errors that should be retried
+	// Note: We specifically check for service-side throttling 403s
+	if errHasCode(req.Error, "RequestTimedOut") ||
+		errHasCode(req.Error, "ThrottlingException") ||
+		errHasCode(req.Error, "Throttling") ||
+		errHasCode(req.Error, "RequestLimitExceeded") ||
+		errHasCode(req.Error, "RequestThrottled") {
+		shouldRetry = true
+	}
+	
 	if !shouldRetry {
 		shouldRetry = c.DefaultRetryer.ShouldRetry(req)
 	}
 
-	// Errors related to tokens
-	if errHasCode(req.Error, "ExpiredToken") || errHasCode(req.Error, "ExpiredTokenException") || errHasCode(req.Error, "InvalidToken") {
+	// Errors related to tokens should NOT be retried
+	if errHasCode(req.Error, "ExpiredToken") || 
+		errHasCode(req.Error, "ExpiredTokenException") || 
+		errHasCode(req.Error, "InvalidToken") || 
+		errHasCode(req.Error, "AccessDenied") {
 		return false
 	}
 
