@@ -20,7 +20,6 @@ require (
 	github.com/termie/go-shutil v0.0.0-20140729215957-bcacb06fecae
 	github.com/urfave/cli/v2 v2.11.2
 	go.uber.org/mock v0.4.0
-	golang.org/x/exp v0.0.0-20250228200357-dead58393ab7
 	golang.org/x/oauth2 v0.25.0
 	gotest.tools/v3 v3.0.3
 )
