@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"github.com/peak/s5cmd/v2/log"
 	"github.com/peak/s5cmd/v2/useragent"
 	"github.com/rogpeppe/go-internal/lockedfile"
+	"golang.org/x/exp/rand"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
