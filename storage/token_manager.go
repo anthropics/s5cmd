@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,8 +24,11 @@ import (
 
 const (
 	expiryGrace     = 5 * time.Minute
-	refreshLoopWait = 30 * time.Second
+	refreshLoopWait = 1 * time.Minute
 )
+
+// To allow mocking in tests
+var randFloat64 = rand.Float64
 
 // TokenManager is the interface for token management
 type TokenManager interface {
@@ -292,7 +296,7 @@ func (m *tokenManagerImpl) refreshLoop() {
 		select {
 		case <-m.ctx.Done():
 			return
-		case <-time.After(refreshLoopWait): // Fixed refresh interval
+		case <-time.After(jitter(refreshLoopWait, 0.5)):
 			m.mu.RLock()
 			token := m.token
 			m.mu.RUnlock()
@@ -459,4 +463,22 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 		Transport: authTransport,
 		Timeout:   30 * time.Second,
 	}, nil
+}
+
+// jitter returns a duration with a random adjustment applied to the base duration.
+// The adjustment is within ±percent of the base duration.
+// For example, jitter(5*time.Minute, 0.3) will return a duration between
+// 3.5 minutes and 6.5 minutes (±30% of 5 minutes).
+func jitter(base time.Duration, percent float64) time.Duration {
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 1 {
+		percent = 1
+	}
+
+	// Generate a random factor between -percent and +percent
+	jitterFactor := (randFloat64()*2 - 1) * percent
+	jitterDuration := time.Duration(float64(base) * jitterFactor)
+	return base + jitterDuration
 }
