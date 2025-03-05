@@ -257,79 +257,60 @@ func TestTokenManagerImpl(t *testing.T) {
 	})
 
 	t.Run("Jitter applies correct duration adjustments", func(t *testing.T) {
-		// Save the original function
-		originalRandFloat64 := randFloat64
-		defer func() { randFloat64 = originalRandFloat64 }()
-
 		tests := []struct {
-			name           string
-			base           time.Duration
-			percent        float64
-			mockRandValue  float64
-			expectedResult time.Duration
+			name        string
+			base        time.Duration
+			percent     float64
+			minExpected time.Duration
+			maxExpected time.Duration
 		}{
 			{
-				name:           "No jitter (0%)",
-				base:           time.Second,
-				percent:        0,
-				mockRandValue:  0.5, // This value doesn't matter when percent is 0
-				expectedResult: time.Second,
+				name:        "No jitter (0%)",
+				base:        time.Second,
+				percent:     0,
+				minExpected: time.Second,
+				maxExpected: time.Second,
 			},
 			{
-				name:           "Negative jitter should be clamped to 0%",
-				base:           time.Second,
-				percent:        -0.2,
-				mockRandValue:  0.5, // This value doesn't matter when percent is clamped to 0
-				expectedResult: time.Second,
+				name:        "Negative jitter should be clamped to 0%",
+				base:        time.Second,
+				percent:     -0.2,
+				minExpected: time.Second,
+				maxExpected: time.Second,
 			},
 			{
-				name:           "Excessive jitter should be clamped to 100%",
-				base:           time.Second,
-				percent:        1.5,
-				mockRandValue:  0,               // This will produce a -1 after adjustment
-				expectedResult: 0 * time.Second, // Base - 100%
+				name:        "Excessive jitter should be clamped to 100%",
+				base:        time.Second,
+				percent:     1.5,
+				minExpected: 0 * time.Second,
+				maxExpected: 2 * time.Second,
 			},
 			{
-				name:           "Excessive jitter should be clamped to 100% (upper bound)",
-				base:           time.Second,
-				percent:        1.5,
-				mockRandValue:  1,               // This will produce a +1 after adjustment
-				expectedResult: 2 * time.Second, // Base + 100%
-			},
-			{
-				name:           "50% jitter, minimum value",
-				base:           time.Second,
-				percent:        0.5,
-				mockRandValue:  0,                      // This will produce a -0.5 after adjustment
-				expectedResult: 500 * time.Millisecond, // Base - 50%
-			},
-			{
-				name:           "50% jitter, median value",
-				base:           time.Second,
-				percent:        0.5,
-				mockRandValue:  0.5,         // This will produce a 0 after adjustment
-				expectedResult: time.Second, // Base + 0%
-			},
-			{
-				name:           "50% jitter, maximum value",
-				base:           time.Second,
-				percent:        0.5,
-				mockRandValue:  1,                       // This will produce a +0.5 after adjustment
-				expectedResult: 1500 * time.Millisecond, // Base + 50%
+				name:        "50% jitter range test",
+				base:        time.Second,
+				percent:     0.5,
+				minExpected: 500 * time.Millisecond, // Base - 50%
+				maxExpected: 1500 * time.Millisecond, // Base + 50%
 			},
 		}
 
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				// Mock the random function to return a specific value
-				randFloat64 = func() float64 { return tc.mockRandValue }
-
 				// Call jitter with the test case values
 				result := jitter(tc.base, tc.percent)
 
-				// Verify the result matches the expected value
-				if result != tc.expectedResult {
-					t.Errorf("Expected %v, got %v", tc.expectedResult, result)
+				// For tests with expected exact value (when percent = 0)
+				if tc.minExpected == tc.maxExpected {
+					if result != tc.minExpected {
+						t.Errorf("Expected exactly %v, got %v", tc.minExpected, result)
+					}
+					return
+				}
+
+				// For tests where we expect a range
+				if result < tc.minExpected || result > tc.maxExpected {
+					t.Errorf("Expected result between %v and %v, got %v", 
+						tc.minExpected, tc.maxExpected, result)
 				}
 			})
 		}

@@ -27,8 +27,6 @@ const (
 	refreshLoopWait = 1 * time.Minute
 )
 
-// To allow mocking in tests
-var randFloat64 = rand.Float64
 
 // TokenManager is the interface for token management
 type TokenManager interface {
@@ -478,7 +476,7 @@ func jitter(base time.Duration, percent float64) time.Duration {
 	}
 
 	// Generate a random factor between -percent and +percent
-	jitterFactor := (randFloat64()*2 - 1) * percent
+	jitterFactor := (rand.Float64()*2 - 1) * percent
 	jitterDuration := time.Duration(float64(base) * jitterFactor)
 	return base + jitterDuration
 }
