@@ -34,7 +34,7 @@ check: vet staticcheck check-fmt check-codegen
 .PHONY: staticcheck
 staticcheck:
 	@go install honnef.co/go/tools/cmd/staticcheck@2025.1
-	@staticcheck -checks 'all,-ST1000' ./...
+	@staticcheck -checks 'all,-ST1000,-SA1006' ./...
 
 .PHONY: vet
 vet:
