@@ -70,10 +70,6 @@ var (
 	s5cmdPath        string
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
 type setupOpts struct {
 	s3backend   string
 	endpointURL string

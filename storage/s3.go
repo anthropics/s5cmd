@@ -1020,7 +1020,7 @@ func (s *S3) doDelete(ctx context.Context, chunk chunk, resultch chan *Object) {
 				resultch <- &Object{Err: err}
 				return
 			}
-			key := fmt.Sprintf("s3://%v/%v", chunk.Bucket, aws.StringValue(k.Key))
+			key := "s3://" + chunk.Bucket + "/" + aws.StringValue(k.Key)
 			url, _ := url.New(key)
 			resultch <- &Object{URL: url}
 		}
