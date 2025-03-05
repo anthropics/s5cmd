@@ -260,7 +260,7 @@ func TestTokenManagerImpl(t *testing.T) {
 		// Save the original function
 		originalRandFloat64 := randFloat64
 		defer func() { randFloat64 = originalRandFloat64 }()
-		
+
 		tests := []struct {
 			name           string
 			base           time.Duration
@@ -286,47 +286,47 @@ func TestTokenManagerImpl(t *testing.T) {
 				name:           "Excessive jitter should be clamped to 100%",
 				base:           time.Second,
 				percent:        1.5,
-				mockRandValue:  0, // This will produce a -1 after adjustment
+				mockRandValue:  0,               // This will produce a -1 after adjustment
 				expectedResult: 0 * time.Second, // Base - 100%
 			},
 			{
 				name:           "Excessive jitter should be clamped to 100% (upper bound)",
 				base:           time.Second,
 				percent:        1.5,
-				mockRandValue:  1, // This will produce a +1 after adjustment
+				mockRandValue:  1,               // This will produce a +1 after adjustment
 				expectedResult: 2 * time.Second, // Base + 100%
 			},
 			{
 				name:           "50% jitter, minimum value",
 				base:           time.Second,
 				percent:        0.5,
-				mockRandValue:  0, // This will produce a -0.5 after adjustment
+				mockRandValue:  0,                      // This will produce a -0.5 after adjustment
 				expectedResult: 500 * time.Millisecond, // Base - 50%
 			},
 			{
 				name:           "50% jitter, median value",
 				base:           time.Second,
 				percent:        0.5,
-				mockRandValue:  0.5, // This will produce a 0 after adjustment
+				mockRandValue:  0.5,         // This will produce a 0 after adjustment
 				expectedResult: time.Second, // Base + 0%
 			},
 			{
 				name:           "50% jitter, maximum value",
 				base:           time.Second,
 				percent:        0.5,
-				mockRandValue:  1, // This will produce a +0.5 after adjustment
+				mockRandValue:  1,                       // This will produce a +0.5 after adjustment
 				expectedResult: 1500 * time.Millisecond, // Base + 50%
 			},
 		}
-		
+
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				// Mock the random function to return a specific value
 				randFloat64 = func() float64 { return tc.mockRandValue }
-				
+
 				// Call jitter with the test case values
 				result := jitter(tc.base, tc.percent)
-				
+
 				// Verify the result matches the expected value
 				if result != tc.expectedResult {
 					t.Errorf("Expected %v, got %v", tc.expectedResult, result)
