@@ -48,6 +48,10 @@ def main(argv=None):
         "-b", "--bucket", required=True, help="Name of the bucket in remote"
     )
     parser.add_argument(
+        "--provider", choices=["s3", "gcs"], default="s3", 
+        help="Cloud storage provider (s3 or gcs)"
+    )
+    parser.add_argument(
         "-l",
         "--local-path",
         help="specify a local path for temporary files to be loaded.",
@@ -79,7 +83,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     cwd = os.getcwd()
 
-    local_dir, dst_path = create_bench_dir(args.bucket, args.prefix, args.local_path)
+    local_dir, dst_path = create_bench_dir(args.bucket, args.prefix, args.local_path, args.provider)
     if not args.debug:
         print("The created local&remote files will be deleted at the end of tests.")
         print(
@@ -295,8 +299,20 @@ class Scenario:
                     cmd.append("--prepare")
                     add_to_cmd(s5cmd_cmds["prepare_new_for_remove"])
 
-            aws_profile = os.environ.get("AWS_PROFILE", "")
-            output = run_cmd(cmd, env_vars={"AWS_PROFILE": aws_profile})
+            # Pass appropriate environment variables based on provider
+            env_vars = {}
+            
+            if self.dst_path.startswith("s3://"):
+                aws_profile = os.environ.get("AWS_PROFILE", "")
+                if aws_profile:
+                    env_vars["AWS_PROFILE"] = aws_profile
+            elif self.dst_path.startswith("gs://"):
+                # For GCS, you might pass GOOGLE_APPLICATION_CREDENTIALS or other GCP variables
+                gcp_credentials = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+                if gcp_credentials:
+                    env_vars["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials
+                
+            output = run_cmd(cmd, env_vars=env_vars)
             summary = self.parse_output(output)
             if self.initialize_bench:
                 init_bench_results(
@@ -437,7 +453,7 @@ def build_s5cmd_exec(old: str, new: str) -> tuple[S5cmd, S5cmd]:
     return a, b
 
 
-def create_bench_dir(bucket, prefix, local_path):
+def create_bench_dir(bucket, prefix, local_path, provider="s3"):
     """
     Create a benchmark directory with a unique name to specified local_path.
     If no path is specified, create temporary directory using mkdtemp.
@@ -447,9 +463,11 @@ def create_bench_dir(bucket, prefix, local_path):
     :param prefix: prefix to be used after specified bucket for remote_path
     :param local_path: specify a path for temporary files to be created in your local. If empty,
     use default temporary folder path of your device.
+    :param provider: cloud storage provider, either "s3" or "gcs"
     :returns:
         - local_dir - created local_dir path as local_path/bench-unique_suffix
         - remote_path - created remote_path as s3://bucket/prefix/unique_suffix
+                      or gs://bucket/prefix/unique_suffix for GCS
 
     """
     if local_path:
@@ -465,11 +483,13 @@ def create_bench_dir(bucket, prefix, local_path):
         os.chdir(tmp_dir)
 
         local_dir = os.getcwd()
-        remote_path = f"s3://{bucket}/{prefix}/{suffix}"
+        protocol = "s3" if provider == "s3" else "gs"
+        remote_path = f"{protocol}://{bucket}/{prefix}/{suffix}"
     else:
         local_dir = mkdtemp(prefix=prefix)
         idx = local_dir.rfind(prefix[-1]) + 1
-        remote_path = f"s3://{bucket}/{prefix}/{local_dir[idx:]}"
+        protocol = "s3" if provider == "s3" else "gs"
+        remote_path = f"{protocol}://{bucket}/{prefix}/{local_dir[idx:]}"
     print(f"All the local temporary files will be created at {local_dir}")
     print(f"All the remote files will be uploaded to {remote_path}")
     return local_dir, remote_path
@@ -479,11 +499,21 @@ def run_cmd(cmd, env_vars=None):
     env = os.environ.copy()
     if env_vars:
         env.update(env_vars)
-    process = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    
+    # Use shell=True for hyperfine commands to preserve quotes and wildcards
+    use_shell = isinstance(cmd, list) and cmd[0] == "hyperfine"
+    
+    if use_shell:
+        # Convert command list to properly quoted string
+        cmd_str = " ".join(cmd)
+        process = subprocess.run(cmd_str, shell=True, capture_output=True, text=True, env=env)
+    else:
+        process = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    
     print(process.stdout, end="")
     print(process.stderr, end="")
     if process.returncode != 0:
-        show_cmd = " ".join(cmd)
+        show_cmd = cmd_str if use_shell else " ".join(cmd)
         __import__('pdb').set_trace()
         raise RuntimeError(f"Error running `{show_cmd}`: returned {process.returncode}")
     return process.stdout
