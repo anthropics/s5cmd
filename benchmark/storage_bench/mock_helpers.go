@@ -171,20 +171,20 @@ func (r *MockReader) Read(p []byte) (n int, err error) {
 	return bytesRead, nil
 }
 
-// MockTokenManager implements a fake token manager for GCS testing
-type MockTokenManager struct {
+// MockTokenSource implements a fake token source for GCS testing
+type MockTokenSource struct {
 	RefreshLatency time.Duration
 	FetchCount     int
 	mu             sync.Mutex
 }
 
-func NewMockTokenManager() *MockTokenManager {
-	return &MockTokenManager{
+func NewMockTokenSource() *MockTokenSource {
+	return &MockTokenSource{
 		RefreshLatency: 200 * time.Millisecond,
 	}
 }
 
-func (m *MockTokenManager) GetToken() (*oauth2.Token, error) {
+func (m *MockTokenSource) Token() (*oauth2.Token, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	
@@ -201,7 +201,12 @@ func (m *MockTokenManager) GetToken() (*oauth2.Token, error) {
 	}, nil
 }
 
-func (m *MockTokenManager) Stop() {
+// For compatibility with benchmark code
+func (m *MockTokenSource) GetToken() (*oauth2.Token, error) {
+	return m.Token()
+}
+
+func (m *MockTokenSource) Stop() {
 	// No-op for mock
 }
 

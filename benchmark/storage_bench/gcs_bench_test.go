@@ -19,13 +19,13 @@ import (
 	"github.com/peak/s5cmd/v2/benchmark/storage_bench/flags"
 )
 
-// TokenManagerMock implements the TokenManager interface
-type TokenManagerMock struct {
+// TokenSourceMock implements the oauth2.TokenSource interface
+type TokenSourceMock struct {
 	RefreshLatency time.Duration
 	RefreshCount   int
 }
 
-func (m *TokenManagerMock) GetToken() (*oauth2.Token, error) {
+func (m *TokenSourceMock) Token() (*oauth2.Token, error) {
 	// Simulate token fetch delay
 	time.Sleep(m.RefreshLatency)
 	m.RefreshCount++
@@ -37,7 +37,12 @@ func (m *TokenManagerMock) GetToken() (*oauth2.Token, error) {
 	}, nil
 }
 
-func (m *TokenManagerMock) Stop() {
+// For compatibility with benchmark code that expects a TokenManager
+func (m *TokenSourceMock) GetToken() (*oauth2.Token, error) {
+	return m.Token()
+}
+
+func (m *TokenSourceMock) Stop() {
 	// No-op for mock
 }
 
@@ -68,7 +73,7 @@ func BenchmarkGCSTokenRefresh(b *testing.B) {
 	for _, latency := range latencies {
 		b.Run(fmt.Sprintf("Latency_%dms", latency.Milliseconds()), func(b *testing.B) {
 			// Create token manager with configured latency
-			tokenManager := &TokenManagerMock{
+			m := &TokenSourceMock{
 				RefreshLatency: latency,
 			}
 			
@@ -76,7 +81,7 @@ func BenchmarkGCSTokenRefresh(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				// Perform token fetch
-				token, err := tokenManager.GetToken()
+				token, err := m.Token()
 				if err != nil {
 					b.Fatalf("Token fetch failed: %v", err)
 				}
@@ -98,8 +103,8 @@ func BenchmarkGCSAuthRoundTripper(b *testing.B) {
 	
 	// Simulates the GoogleAuthRoundTripper used by GCS operations
 	
-	// Create a basic mock token manager
-	tokenManager := &TokenManagerMock{
+	// Create a basic mock token source
+	tokenSource := &TokenSourceMock{
 		RefreshLatency: 100 * time.Millisecond,
 	}
 	
@@ -110,7 +115,7 @@ func BenchmarkGCSAuthRoundTripper(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Token fetch (this is the most expensive part)
-		token, err := tokenManager.GetToken()
+		token, err := tokenSource.Token()
 		if err != nil {
 			b.Fatalf("Token fetch failed: %v", err)
 		}
@@ -139,14 +144,14 @@ func BenchmarkGCSList(b *testing.B) {
 	fileCounts := []int{10, 100, 1000, 10000}
 	
 	for _, count := range fileCounts {
-		b.Run(testName(count), func(b *testing.B) {
+		b.Run(gcsTestName(count), func(b *testing.B) {
 			// Setup
 			ctrl := gomock.NewController(b)
 			defer ctrl.Finish()
 			
 			mockStorage := NewBenchStorage(ctrl)
-			tokenManager := NewMockTokenManager()
-			tokenManager.RefreshLatency = 200 * time.Millisecond
+			tokenSource := NewMockTokenSource()
+			tokenSource.RefreshLatency = 200 * time.Millisecond
 			
 			// Prepare test objects
 			objects := SimulateGSObjects("prefix", count, 1024) // 1KB files
@@ -171,8 +176,8 @@ func BenchmarkGCSList(b *testing.B) {
 				DoAndReturn(func(ctx context.Context, u *url.URL, followSymlinks bool) <-chan *storage.Object {
 					// For GCS, we add token fetch latency to operation
 					// Make sure we track this count
-					tokenManager.FetchCount++
-					time.Sleep(tokenManager.RefreshLatency)
+					tokenSource.FetchCount++
+					time.Sleep(tokenSource.RefreshLatency)
 					
 					// Create results channel
 					ch := make(chan *storage.Object, len(objects))
@@ -233,14 +238,14 @@ func BenchmarkGCSList(b *testing.B) {
 			dataThroughput := float64(dataSizeTotal) / elapsed.Seconds() / (1024 * 1024)
 			
 			// Calculate token metrics
-			tokenOverheadTotal := time.Duration(tokenManager.FetchCount) * tokenManager.RefreshLatency
+			tokenOverheadTotal := time.Duration(tokenSource.FetchCount) * tokenSource.RefreshLatency
 			tokenOverheadPct := float64(tokenOverheadTotal) / float64(elapsed) * 100
 			
 			// Report custom metrics
 			b.ReportMetric(objectsPerSec, "objects/s")
 			b.ReportMetric(dataThroughput, "MB/s")
 			b.ReportMetric(float64(count), "objects/op")
-			b.ReportMetric(float64(tokenManager.FetchCount), "tokenRefreshes")
+			b.ReportMetric(float64(tokenSource.FetchCount), "tokenRefreshes")
 			b.ReportMetric(tokenOverheadPct, "tokenOverhead%")
 			
 			// Report operation counts
@@ -277,8 +282,8 @@ func BenchmarkGCSCopy(b *testing.B) {
 			defer ctrl.Finish()
 			
 			mockStorage := NewBenchStorage(ctrl)
-			tokenManager := NewMockTokenManager()
-			tokenManager.RefreshLatency = 200 * time.Millisecond
+			tokenSource := NewMockTokenSource()
+			tokenSource.RefreshLatency = 200 * time.Millisecond
 			
 			// Configure throughput based on file size
 			if fs.size > 10*1024*1024 {
@@ -305,8 +310,8 @@ func BenchmarkGCSCopy(b *testing.B) {
 					defer mockStorage.recordOp("Copy")()
 					
 					// Simulate token refresh
-					tokenManager.FetchCount++
-					time.Sleep(tokenManager.RefreshLatency)
+					tokenSource.FetchCount++
+					time.Sleep(tokenSource.RefreshLatency)
 					
 					// Simulate data transfer based on throughput
 					bytesToTransfer := fs.size
@@ -345,13 +350,13 @@ func BenchmarkGCSCopy(b *testing.B) {
 			mbPerSec := bytesPerSec / (1024 * 1024)
 			
 			// Calculate token metrics
-			tokenOverheadTotal := time.Duration(tokenManager.FetchCount) * tokenManager.RefreshLatency
+			tokenOverheadTotal := time.Duration(tokenSource.FetchCount) * tokenSource.RefreshLatency
 			tokenOverheadPct := float64(tokenOverheadTotal) / float64(elapsed) * 100
 			
 			// Report custom metrics
 			b.ReportMetric(mbPerSec, "MB/s")
 			b.ReportMetric(float64(totalBytes)/(1024*1024), "MB(total)")
-			b.ReportMetric(float64(tokenManager.FetchCount), "tokenRefreshes")
+			b.ReportMetric(float64(tokenSource.FetchCount), "tokenRefreshes")
 			b.ReportMetric(tokenOverheadPct, "tokenOverhead%")
 			
 			// Report operation counts
@@ -373,14 +378,14 @@ func BenchmarkGCSDelete(b *testing.B) {
 	fileCounts := []int{1, 10, 100, 1000}
 	
 	for _, count := range fileCounts {
-		b.Run(testName(count), func(b *testing.B) {
+		b.Run(gcsTestName(count), func(b *testing.B) {
 			// Setup
 			ctrl := gomock.NewController(b)
 			defer ctrl.Finish()
 			
 			mockStorage := NewBenchStorage(ctrl)
-			tokenManager := NewMockTokenManager()
-			tokenManager.RefreshLatency = 200 * time.Millisecond
+			tokenSource := NewMockTokenSource()
+			tokenSource.RefreshLatency = 200 * time.Millisecond
 			
 			// Prepare URLs for deletion
 			urls := make([]*url.URL, count)
@@ -410,8 +415,8 @@ func BenchmarkGCSDelete(b *testing.B) {
 						defer mockStorage.recordOp("MultiDelete")()
 						
 						// Simulate token refresh for GCS
-						tokenManager.FetchCount++
-						time.Sleep(tokenManager.RefreshLatency)
+						tokenSource.FetchCount++
+						time.Sleep(tokenSource.RefreshLatency)
 						
 						// Simulate batch processing with appropriate delays
 						batches := (count + 999) / 1000 // Allow up to 1000 keys per request
@@ -480,7 +485,7 @@ func BenchmarkGCSDelete(b *testing.B) {
 			batchesPerSec := float64(mockStorage.OpCount["DeleteBatch"]) / elapsed.Seconds()
 			
 			// Calculate token metrics
-			tokenOverheadTotal := time.Duration(tokenManager.FetchCount) * tokenManager.RefreshLatency
+			tokenOverheadTotal := time.Duration(tokenSource.FetchCount) * tokenSource.RefreshLatency
 			tokenOverheadPct := float64(tokenOverheadTotal) / float64(elapsed) * 100
 			
 			// Assume 1KB per deletion metadata for throughput calculation
@@ -492,7 +497,7 @@ func BenchmarkGCSDelete(b *testing.B) {
 			b.ReportMetric(batchesPerSec, "batches/s")
 			b.ReportMetric(metadataThroughput, "MB/s")
 			b.ReportMetric(float64(count), "objects/op")
-			b.ReportMetric(float64(tokenManager.FetchCount), "tokenRefreshes")
+			b.ReportMetric(float64(tokenSource.FetchCount), "tokenRefreshes")
 			b.ReportMetric(tokenOverheadPct, "tokenOverhead%")
 			
 			// Report operation counts
@@ -521,13 +526,13 @@ func BenchmarkGCSScenario(b *testing.B) {
 			defer ctrl.Finish()
 			
 			mockStorage := NewBenchStorage(ctrl)
-			tokenManager := NewMockTokenManager()
+			tokenSource := NewMockTokenSource()
 			
 			// Configure mock according to scenario
 			mockStorage.Latency = scenario.StorageLatency
 			mockStorage.Throughput = scenario.Throughput
 			mockStorage.ErrorRate = scenario.ErrorRate
-			tokenManager.RefreshLatency = scenario.GCSTokenLatency
+			tokenSource.RefreshLatency = scenario.GCSTokenLatency
 			
 			// Generate test objects based on scenario
 			var objects []*storage.Object
@@ -556,8 +561,8 @@ func BenchmarkGCSScenario(b *testing.B) {
 				List(gomock.Any(), gomock.Any(), gomock.Any()).
 				DoAndReturn(func(ctx context.Context, u *url.URL, followSymlinks bool) <-chan *storage.Object {
 					// For GCS, we add token fetch latency to operation
-					tokenManager.FetchCount++
-					time.Sleep(tokenManager.RefreshLatency)
+					tokenSource.FetchCount++
+					time.Sleep(tokenSource.RefreshLatency)
 					
 					// Create results channel
 					ch := make(chan *storage.Object, len(objects))
@@ -591,8 +596,8 @@ func BenchmarkGCSScenario(b *testing.B) {
 					defer mockStorage.recordOp("Copy")()
 					
 					// For GCS, we add token fetch latency to operation
-					tokenManager.FetchCount++
-					time.Sleep(tokenManager.RefreshLatency)
+					tokenSource.FetchCount++
+					time.Sleep(tokenSource.RefreshLatency)
 					
 					// Simulate error based on error rate
 					if mockStorage.ErrorRate > 0 && rand.Float64() < mockStorage.ErrorRate {
@@ -639,7 +644,7 @@ func BenchmarkGCSScenario(b *testing.B) {
 			}
 			
 			// Report token metrics
-			b.ReportMetric(float64(tokenManager.FetchCount), "tokenRefreshes")
+			b.ReportMetric(float64(tokenSource.FetchCount), "tokenRefreshes")
 		})
 	}
 }
@@ -730,4 +735,8 @@ func runGCSScenario(b *testing.B, mockStorage *BenchStorage) {
 		
 		objCount++
 	}
+}
+
+func gcsTestName(count int) string {
+	return fmt.Sprintf("Count_%d", count)
 }
