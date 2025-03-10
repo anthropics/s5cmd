@@ -41,7 +41,7 @@ type tokenManagerImpl struct {
 	cacheFile string
 	audience  string
 	token     atomic.Pointer[oauth2.Token]
-	mu        sync.Mutex
+	mu        sync.RWMutex
 	updates   chan struct{}
 	client    *retryablehttp.Client
 }
@@ -184,44 +184,22 @@ func (m *tokenManagerImpl) Stop() {
 
 // GetToken returns the current token or blocks until one is available or context is canceled
 func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
-	if err := m.ctx.Err(); err != nil {
-		return nil, err
-	}
-
 	// Fast path: try to get a valid token without any locks
 	if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
 		token := *tokenPtr
 		return &token, nil
 	}
 
-	// Slow path: no valid token, need to wait or refresh
+	// Slow path: no valid token, need to wait for refreshLoop to update it
 	for {
-		if err := m.ctx.Err(); err != nil {
-			return nil, err
-		}
-		
-		m.mu.Lock()
-		
-		// Double-check after lock acquisition
+		// Quick check with read lock
+		m.mu.RLock()
 		if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
 			token := *tokenPtr
-			m.mu.Unlock()
+			m.mu.RUnlock()
 			return &token, nil
 		}
-		
-		err := m.refresh()
-		m.mu.Unlock()
-		
-		if err := m.ctx.Err(); err != nil {
-			return nil, err
-		}
-		
-		if err == nil {
-			if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
-				token := *tokenPtr
-				return &token, nil
-			}
-		}
+		m.mu.RUnlock()
 
 		select {
 		case <-m.ctx.Done():
@@ -256,14 +234,14 @@ func (m *tokenManagerImpl) refresh() error {
 			time.Until(cachedInfo.Token.Expiry) > 5*time.Minute {
 			// Use token that was refreshed by another process
 			m.token.Store(cachedInfo.Token)
-			
+
 			// Notify waiters of new token
 			select {
 			case m.updates <- struct{}{}:
 			default:
 				// Channel full or no waiters, that's OK
 			}
-			
+
 			return nil
 		}
 	}
@@ -321,23 +299,7 @@ func (m *tokenManagerImpl) refreshLoop() {
 		case <-m.ctx.Done():
 			return
 		case <-time.After(refreshLoopWait): // Fixed refresh interval
-			tokenPtr := m.token.Load()
-			
-			// Skip refresh if token is still valid and not expiring soon
-			if tokenPtr != nil && tokenPtr.Valid() && time.Until(tokenPtr.Expiry) > expiryGrace {
-				continue
-			}
-
-			m.mu.Lock()
-			err := m.refresh()
-			m.mu.Unlock()
-			
-			if err != nil {
-				log.Error(log.ErrorMessage{
-					Command: "TokenRefresh",
-					Err:     fmt.Sprintf("Failed to refresh token: %v", err),
-				})
-			}
+			m.refresh()
 		}
 	}
 }

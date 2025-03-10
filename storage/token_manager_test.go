@@ -197,7 +197,7 @@ func TestTokenManagerImpl(t *testing.T) {
 	t.Run("GetToken respects context cancellation", func(t *testing.T) {
 		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		// Immediately cancel the context before creating the token manager
 		cancel()
 
@@ -206,10 +206,10 @@ func TestTokenManagerImpl(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create token manager: %v", err)
 		}
-		
+
 		// Attempt to get token - should immediately return context.Canceled
 		_, err = manager.GetToken()
-		
+
 		// Verify the error is context cancellation
 		if err == nil {
 			t.Error("Expected error due to context cancellation")
@@ -289,7 +289,7 @@ func setupBenchTokenManager(b *testing.B) TokenManager {
 // BenchmarkGetToken tests the performance of GetToken
 func BenchmarkGetToken(b *testing.B) {
 	manager := setupBenchTokenManager(b)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := manager.GetToken()
@@ -302,7 +302,7 @@ func BenchmarkGetToken(b *testing.B) {
 // BenchmarkGetTokenParallel tests GetToken with parallel goroutines
 func BenchmarkGetTokenParallel(b *testing.B) {
 	manager := setupBenchTokenManager(b)
-	
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -318,7 +318,7 @@ func BenchmarkGetTokenParallel(b *testing.B) {
 func BenchmarkGetTokenWithContention(b *testing.B) {
 	manager := setupBenchTokenManager(b)
 	impl := manager.(*tokenManagerImpl)
-	
+
 	// Make token expire soon
 	expiredToken := &oauth2.Token{
 		AccessToken: "expired-token",
@@ -326,11 +326,11 @@ func BenchmarkGetTokenWithContention(b *testing.B) {
 		Expiry:      time.Now().Add(2 * time.Second),
 	}
 	impl.token.Store(expiredToken)
-	
+
 	// Run with multiple goroutines to create contention
 	b.ResetTimer()
 	var wg sync.WaitGroup
-	
+
 	// Launch goroutines
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -344,6 +344,89 @@ func BenchmarkGetTokenWithContention(b *testing.B) {
 			}
 		}()
 	}
-	
+
 	wg.Wait()
+}
+
+// BenchmarkGetTokenWithContextCancellation tests how quickly GetToken returns on context cancellation
+func BenchmarkGetTokenWithContextCancellation(b *testing.B) {
+	// Set up a manager with a context we can cancel
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	
+	// Create mock credentials
+	mockCreds := &google.Credentials{
+		TokenSource: oauth2.StaticTokenSource(&oauth2.Token{
+			AccessToken: "benchmark-token",
+			TokenType:   "Bearer",
+			Expiry:      time.Now().Add(1 * time.Hour),
+		}),
+	}
+
+	// Override finding credentials
+	origFindDefaultCredentials := findDefaultCredentials
+	findDefaultCredentials = func(ctx context.Context, scopes ...string) (*google.Credentials, error) {
+		return mockCreds, nil
+	}
+	b.Cleanup(func() { findDefaultCredentials = origFindDefaultCredentials })
+
+	manager, err := NewTokenManager(ctx, nil)
+	if err != nil {
+		b.Fatalf("Failed to create token manager: %v", err)
+	}
+	b.Cleanup(func() { manager.Stop() })
+	
+	// Get one valid token to ensure initialization is complete
+	_, err = manager.GetToken()
+	if err != nil {
+		b.Fatalf("GetToken failed: %v", err)
+	}
+
+	// Expire the token to force waiting behavior
+	impl := manager.(*tokenManagerImpl)
+	expiredToken := &oauth2.Token{
+		AccessToken: "expired-token",
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(-1 * time.Hour),
+	}
+	impl.token.Store(expiredToken)
+
+	// Set up a goroutine to cancel context after a short delay
+	cancelAfter := 100 * time.Microsecond
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Create a new context for each iteration
+		ctx, cancel := context.WithCancel(context.Background())
+		
+		// Set up cancellation in a separate goroutine
+		go func() {
+			time.Sleep(cancelAfter)
+			cancel()
+		}()
+		
+		// Create a new manager with this context
+		manager, err := NewTokenManager(ctx, nil)
+		if err != nil {
+			b.Fatalf("Failed to create token manager: %v", err)
+		}
+		
+		// Make token invalid to force waiting behavior
+		impl := manager.(*tokenManagerImpl)
+		expiredToken := &oauth2.Token{
+			AccessToken: "expired-token",
+			TokenType:   "Bearer",
+			Expiry:      time.Now().Add(-1 * time.Hour),
+		}
+		impl.token.Store(expiredToken)
+		
+		// Call GetToken which should block until context is cancelled
+		_, err = manager.GetToken()
+		if err != context.Canceled {
+			b.Fatalf("Expected context.Canceled error, got: %v", err)
+		}
+		
+		// Clean up
+		manager.Stop()
+	}
 }
