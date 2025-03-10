@@ -322,17 +322,18 @@ class Scenario:
             self.run_name = f"{run} {self.name}"
             print(f"Running: {self.run_name}:\n")
 
+            add_to_cmd = lambda x: cmd.append(f"'{x}'")
             if run == "upload":
-                cmd.append(s5cmd_cmds["old_upload"])
-                cmd.append(s5cmd_cmds["new_upload"])
+                add_to_cmd(s5cmd_cmds["old_upload"])
+                add_to_cmd(s5cmd_cmds["new_upload"])
 
             elif run == "download":
-                cmd.append(s5cmd_cmds["old_download"])
-                cmd.append(s5cmd_cmds["new_download"])
+                add_to_cmd(s5cmd_cmds["old_download"])
+                add_to_cmd(s5cmd_cmds["new_download"])
 
             elif run == "remove":
-                cmd.append(s5cmd_cmds["old_remove"])
-                cmd.append(s5cmd_cmds["new_remove"])
+                add_to_cmd(s5cmd_cmds["old_remove"])
+                add_to_cmd(s5cmd_cmds["new_remove"])
 
                 # if there is only one run without warmups, then do not prepare.
                 if (
@@ -340,14 +341,16 @@ class Scenario:
                     or int(self.hyperfine_args["warmup"]) >= 1
                 ):
                     cmd.append("--prepare")
-                    cmd.append(s5cmd_cmds["prepare_old_for_remove"])
+                    add_to_cmd(s5cmd_cmds["prepare_old_for_remove"])
                     cmd.append("--prepare")
-                    cmd.append(s5cmd_cmds["prepare_new_for_remove"])
+                    add_to_cmd(s5cmd_cmds["prepare_new_for_remove"])
 
             if self.hyperfine_args["extra_flags"]:
                 cmd.append(self.hyperfine_args["extra_flags"].strip())
 
-            output = run_cmd(cmd)
+            # Pass AWS environment variables to subprocess
+            aws_profile = os.environ.get("AWS_PROFILE", "")
+            output = run_cmd(cmd, env_vars={"AWS_PROFILE": aws_profile})
             summary = self.parse_output(output)
             if self.initialize_bench:
                 init_bench_results(
@@ -364,9 +367,13 @@ class Scenario:
             with open(temp_dir, "r+") as f:
                 lines = f.readlines()
                 # get hyperfine markdown output and add a new column in the front as scenario name
-                detailed_summary = (
-                    f"| {self.run_name} {lines[-1]}" f"| {self.run_name} {lines[-2]}"
-                )
+                if lines:
+                    detailed_summary = (
+                        f"| {self.run_name} {lines[-1]}" f"| {self.run_name} {lines[-2]}"
+                    )
+                else:
+                    print("No output found in temp.md file?")
+                    detailed_summary = ""
 
             with open(os.path.join(self.cwd, "detailed_summary.md"), "a") as f:
                 f.write(detailed_summary)
@@ -561,11 +568,17 @@ def create_bench_dir(bucket, prefix, local_path):
     return local_dir, remote_path
 
 
-def run_cmd(cmd, verbose=True):
-    process = subprocess.run(cmd, capture_output=True, text=True)
+def run_cmd(cmd, verbose=True, env_vars=None):
+    env = os.environ.copy()
+    if env_vars:
+        env.update(env_vars)
+    process = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if verbose:
         print(process.stdout, end="")
         print(process.stderr, end="")
+    if process.returncode != 0:
+        show_cmd = " ".join(cmd)
+        print(f"Error running `{show_cmd}`: returned {process.returncode}")
     return process.stdout
 
 
