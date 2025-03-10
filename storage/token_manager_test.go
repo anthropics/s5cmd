@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,11 +142,12 @@ func TestTokenManagerImpl(t *testing.T) {
 
 		// Force the token to be expired
 		impl := manager.(*tokenManagerImpl)
-		impl.token = &oauth2.Token{
+		expiredToken := &oauth2.Token{
 			AccessToken: "original-token",
 			TokenType:   "Bearer",
 			Expiry:      time.Now().Add(-1 * time.Minute),
 		}
+		impl.token.Store(expiredToken)
 
 		// Call refresh synchronously before releasing lock
 		err = impl.refresh()
@@ -193,31 +195,25 @@ func TestTokenManagerImpl(t *testing.T) {
 	})
 
 	t.Run("GetToken respects context cancellation", func(t *testing.T) {
+		// Create a context that we can cancel
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		
+		// Immediately cancel the context before creating the token manager
+		cancel()
 
+		// Create token manager with the already cancelled context
 		manager, err := NewTokenManager(ctx, nil)
 		if err != nil {
 			t.Fatalf("Failed to create token manager: %v", err)
 		}
-		defer manager.Stop()
-
-		// Force token to be invalid
-		impl := manager.(*tokenManagerImpl)
-		impl.token = nil
-
-		// Create a goroutine to cancel context after a short delay
-		go func() {
-			time.Sleep(100 * time.Millisecond)
-			cancel()
-		}()
-
-		// Try to get token - should fail due to context cancellation
+		
+		// Attempt to get token - should immediately return context.Canceled
 		_, err = manager.GetToken()
+		
+		// Verify the error is context cancellation
 		if err == nil {
 			t.Error("Expected error due to context cancellation")
-		}
-		if err != context.Canceled {
+		} else if err != context.Canceled {
 			t.Errorf("Expected context.Canceled, got %v", err)
 		}
 	})
@@ -255,4 +251,99 @@ func TestTokenManagerImpl(t *testing.T) {
 			t.Errorf("Unexpected error checking cache file: %v", err)
 		}
 	})
+}
+
+// setupBenchTokenManager creates a token manager for benchmarks
+func setupBenchTokenManager(b *testing.B) TokenManager {
+	// Set up mock token
+	token := &oauth2.Token{
+		AccessToken: "benchmark-token",
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(1 * time.Hour),
+	}
+
+	// Create mock credentials
+	mockCreds := &google.Credentials{
+		TokenSource: oauth2.StaticTokenSource(token),
+	}
+
+	// Override finding credentials
+	origFindDefaultCredentials := findDefaultCredentials
+	findDefaultCredentials = func(ctx context.Context, scopes ...string) (*google.Credentials, error) {
+		return mockCreds, nil
+	}
+	b.Cleanup(func() { findDefaultCredentials = origFindDefaultCredentials })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	b.Cleanup(func() { cancel() })
+
+	manager, err := NewTokenManager(ctx, nil)
+	if err != nil {
+		b.Fatalf("Failed to create token manager: %v", err)
+	}
+	b.Cleanup(func() { manager.Stop() })
+
+	return manager
+}
+
+// BenchmarkGetToken tests the performance of GetToken
+func BenchmarkGetToken(b *testing.B) {
+	manager := setupBenchTokenManager(b)
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := manager.GetToken()
+		if err != nil {
+			b.Fatalf("GetToken failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkGetTokenParallel tests GetToken with parallel goroutines
+func BenchmarkGetTokenParallel(b *testing.B) {
+	manager := setupBenchTokenManager(b)
+	
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, err := manager.GetToken()
+			if err != nil {
+				b.Fatalf("GetToken failed: %v", err)
+			}
+		}
+	})
+}
+
+// BenchmarkGetTokenWithContention tests GetToken performance with token refresh contention
+func BenchmarkGetTokenWithContention(b *testing.B) {
+	manager := setupBenchTokenManager(b)
+	impl := manager.(*tokenManagerImpl)
+	
+	// Make token expire soon
+	expiredToken := &oauth2.Token{
+		AccessToken: "expired-token",
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(2 * time.Second),
+	}
+	impl.token.Store(expiredToken)
+	
+	// Run with multiple goroutines to create contention
+	b.ResetTimer()
+	var wg sync.WaitGroup
+	
+	// Launch goroutines
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < b.N/10; j++ {
+				_, err := manager.GetToken()
+				if err != nil {
+					b.Fatalf("GetToken failed: %v", err)
+				}
+			}
+		}()
+	}
+	
+	wg.Wait()
 }

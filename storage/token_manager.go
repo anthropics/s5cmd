@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -34,14 +35,14 @@ type TokenManager interface {
 
 // tokenManagerImpl handles token fetching, caching, and refreshing in a background goroutine
 type tokenManagerImpl struct {
-	ctx       context.Context    // Context for lifecycle management
-	cancel    context.CancelFunc // Cancel function to stop the manager
+	ctx       context.Context
+	cancel    context.CancelFunc
 	creds     *google.Credentials
 	cacheFile string
 	audience  string
-	token     *oauth2.Token
-	mu        sync.RWMutex
-	updates   chan struct{} // Channel for token update notifications
+	token     atomic.Pointer[oauth2.Token]
+	mu        sync.Mutex
+	updates   chan struct{}
 	client    *retryablehttp.Client
 }
 
@@ -161,7 +162,7 @@ func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager
 	// Try to load initial token from cache
 	token, err := m.readTokenFromCache()
 	if err == nil && token != nil && token.Valid() && time.Until(token.Expiry) >= 5*time.Minute {
-		m.token = token
+		m.token.Store(token)
 	} else {
 		if err := m.refresh(); err != nil {
 			log.Error(log.ErrorMessage{
@@ -183,27 +184,50 @@ func (m *tokenManagerImpl) Stop() {
 
 // GetToken returns the current token or blocks until one is available or context is canceled
 func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
-	// Always check context first
 	if err := m.ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	for {
-		// Quick check with read lock
-		m.mu.RLock()
-		if m.token != nil && m.token.Valid() {
-			token := m.token
-			m.mu.RUnlock()
-			return token, nil
-		}
-		m.mu.RUnlock()
+	// Fast path: try to get a valid token without any locks
+	if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
+		token := *tokenPtr
+		return &token, nil
+	}
 
-		// Wait for update or context cancellation
+	// Slow path: no valid token, need to wait or refresh
+	for {
+		if err := m.ctx.Err(); err != nil {
+			return nil, err
+		}
+		
+		m.mu.Lock()
+		
+		// Double-check after lock acquisition
+		if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
+			token := *tokenPtr
+			m.mu.Unlock()
+			return &token, nil
+		}
+		
+		err := m.refresh()
+		m.mu.Unlock()
+		
+		if err := m.ctx.Err(); err != nil {
+			return nil, err
+		}
+		
+		if err == nil {
+			if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
+				token := *tokenPtr
+				return &token, nil
+			}
+		}
+
 		select {
 		case <-m.ctx.Done():
 			return nil, m.ctx.Err()
 		case <-m.updates:
-			continue
+			// Continue the loop
 		}
 	}
 }
@@ -214,7 +238,7 @@ func (m *tokenManagerImpl) refresh() error {
 		return fmt.Errorf("failed to create cache directory: %v", err)
 	}
 
-	// Hold lock throughout refresh process
+	// Use file lock to coordinate with other processes
 	file, err := lockedfile.OpenFile(m.cacheFile, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to get lock: %v", err)
@@ -231,14 +255,20 @@ func (m *tokenManagerImpl) refresh() error {
 			cachedInfo.Token.Valid() &&
 			time.Until(cachedInfo.Token.Expiry) > 5*time.Minute {
 			// Use token that was refreshed by another process
-			m.mu.Lock()
-			m.token = cachedInfo.Token
-			m.mu.Unlock()
+			m.token.Store(cachedInfo.Token)
+			
+			// Notify waiters of new token
+			select {
+			case m.updates <- struct{}{}:
+			default:
+				// Channel full or no waiters, that's OK
+			}
+			
 			return nil
 		}
 	}
 
-	// Get new token while holding lock
+	// Get new token
 	ctx := context.WithValue(m.ctx, oauth2.HTTPClient, m.client.StandardClient())
 	tokenSource := oauth2.ReuseTokenSourceWithExpiry(nil, &contextTokenSource{
 		ctx: ctx,
@@ -250,10 +280,8 @@ func (m *tokenManagerImpl) refresh() error {
 		return err
 	}
 
-	// Update memory and notify waiters
-	m.mu.Lock()
-	m.token = newToken
-	m.mu.Unlock()
+	// Store atomically
+	m.token.Store(newToken)
 
 	// Notify waiters of new token
 	select {
@@ -262,7 +290,7 @@ func (m *tokenManagerImpl) refresh() error {
 		// Channel full or no waiters, that's OK
 	}
 
-	// Write new token while still holding lock
+	// Write new token to file cache
 	cachedInfo := CachedTokenInfo{
 		Token:    newToken,
 		Audience: m.audience,
@@ -293,17 +321,17 @@ func (m *tokenManagerImpl) refreshLoop() {
 		case <-m.ctx.Done():
 			return
 		case <-time.After(refreshLoopWait): // Fixed refresh interval
-			m.mu.RLock()
-			token := m.token
-			m.mu.RUnlock()
-
+			tokenPtr := m.token.Load()
+			
 			// Skip refresh if token is still valid and not expiring soon
-			if token != nil && token.Valid() && time.Until(token.Expiry) > expiryGrace {
+			if tokenPtr != nil && tokenPtr.Valid() && time.Until(tokenPtr.Expiry) > expiryGrace {
 				continue
 			}
 
-			// Try to refresh
+			m.mu.Lock()
 			err := m.refresh()
+			m.mu.Unlock()
+			
 			if err != nil {
 				log.Error(log.ErrorMessage{
 					Command: "TokenRefresh",
