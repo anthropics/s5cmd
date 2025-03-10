@@ -1,23 +1,129 @@
 
-## s5cmd performance regression tests
+# s5cmd Performance Benchmarks
 
-`bench.py` allow us to compare two different build (from either version tag, PR number or commit tag) performance under various scenarios. These scenarios include:
+This directory contains two benchmarking systems for s5cmd:
 
-1. Upload, Download, Remove many small sized file
-1. Upload, Download, Remove large file
-1. Upload, Download, Remove very large file
+1. **Python-based Integration Benchmarks** (`bench.py`): Tests real-world performance against actual S3/GCS buckets
+2. **Go-based Synthetic Benchmarks** (`storage_bench/`, `command_bench/`): Synthetic benchmarks using mocked storage backends
 
-> To change the scenarios, you should edit it inside the `bench.py` for now. In the future, this could be read from a file. From each scenario, user should not forget to change the file size and file count keeping in mind the restrictions of their system.
+## Go-based Synthetic Benchmarks
 
+The Go benchmarks use the Go testing framework to enable quick performance testing without requiring real S3 or GCS buckets. These are ideal for identifying performance regressions during development.
 
-### required tools
-This script is dependent on the following tools. Make sure you install them to your system before running `bench.py`.
+### Running Go Benchmarks
+
+#### Using the Command-Line Tool (Recommended)
+
+For better output formatting and easy comparison, use the `benchrun` tool:
+
+```bash
+# Build the benchrun tool
+go build -o benchrun ./benchmark/cmd/benchrun
+
+# Run all benchmarks with default settings
+./benchrun
+
+# Run S3 benchmarks only with custom throughput
+./benchrun -s3 -throughput 200
+
+# Run GCS benchmarks with specific token fetch latency
+./benchrun -gcs -token-latency 300ms
+
+# Compare with previous benchmark run
+./benchrun -compare
+```
+
+Output includes human-readable metrics:
+- Time per operation (in s, ms, µs rather than raw nanoseconds)
+- Throughput in appropriate units (GB/s, MB/s, KB/s)
+- Objects processed per second
+- API operation counts
+- Token refresh metrics for GCS operations
+
+#### Using Go Test Directly
+
+To run all benchmarks:
+
+```
+go test -bench=. ./benchmark/...
+```
+
+To run specific benchmark types:
+
+```
+# Run only S3 storage benchmarks
+go test -bench=. ./benchmark/storage_bench -run=^$ -bench=S3
+
+# Run only GCS storage benchmarks
+go test -bench=. ./benchmark/storage_bench -run=^$ -bench=GCS
+
+# Run only command benchmarks
+go test -bench=. ./benchmark/command_bench -run=^$
+```
+
+Customize behavior with flags:
+
+```
+# Test with higher simulated throughput
+go test -bench=. ./benchmark/... -bench.throughput=200
+
+# Test with GCS token latency of 100ms
+go test -bench=. ./benchmark/... -bench.tokenlatency=100ms
+
+# Test with 5% error rate
+go test -bench=. ./benchmark/... -bench.errorrate=0.05
+
+# Test with 20 workers
+go test -bench=. ./benchmark/... -bench.workers=20
+
+# Enable human-readable output
+go test -bench=. ./benchmark/... -bench.human=true
+```
+
+### Go Benchmark Structure
+
+- `storage_bench/`: Tests storage operations (List, Copy, Delete) for S3 and GCS
+- `command_bench/`: Tests high-level commands like CP
+- `scenarios/`: Defines benchmark scenarios (file sizes, counts, etc.)
+- `cmd/benchrun/`: Command-line tool for running benchmarks with improved reporting
+
+### Understanding Benchmark Metrics
+
+The benchmark results now include several metrics to help identify performance issues:
+
+#### Time Metrics
+- **ns/op**: Base metric showing nanoseconds per operation (displayed in human-readable format)
+- **s/op, ms/op, µs/op**: Human-readable time per operation in appropriate units
+
+#### Throughput Metrics
+- **MB/s**: Megabytes processed per second
+- **GB/s**: For extremely high throughput operations
+- **KB/s**: For slower operations
+
+#### Operation Metrics
+- **objects/s**: Number of objects processed per second
+- **List/op, Copy/op, etc.**: Count of each operation type performed
+- **deletes/s, batches/s**: Operation-specific metrics
+
+#### GCS-specific Metrics
+- **tokenRefreshes**: Number of token refresh operations performed
+- **tokenOverhead%**: Percentage of total time spent on token refresh operations
+
+When comparing benchmark runs with `-compare`, you'll see percentage changes with indicators:
+- **🟢**: Performance improvement 
+- **🔴**: Performance regression
+- **→**: No significant change
+
+## Python-based Integration Benchmarks
+
+The Python benchmarks (`bench.py`) test real-world performance by working with actual S3/GCS buckets, comparing different builds of s5cmd.
+
+### Required Tools
+The Python benchmark requires the following tools:
 - git
 - go 
 - hyperfine
 - truncate
-
-
 
 To run use the following syntax:
 ```
