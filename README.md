@@ -12,7 +12,17 @@ This project largely uses the standard go tooling.
 
 Run tests with `make test` (basically just `go test ./...`).
 
-### example of benchmarking with hyperfine
+### Running token manager benchmarks
+
+To benchmark the token manager performance:
+
+```
+go test -v ./storage -run='^$' -bench=Token
+```
+
+This runs the various token manager benchmarks to measure performance in different scenarios including token acquisition, parallel access, and context cancellation handling.
+
+### Example of benchmarking with hyperfine
 
 ```
 hyperfine --export-markdown bench.md -u second --runs 10 --warmup 0 -n s5cmd-old-ff92bdc -n s5cmd-new-HEAD  --show-output '~/code/benchmark-s5cmd/old/s5cmd cp testfile-s5cmd-10mb s3://serum-intake-waiver-espalier/s5cmd-benchmarks/' '~/code/benchmark-s5cmd/new/s5cmd cp testfile-s5cmd-10mb s3://serum-intake-waiver-espalier/s5cmd-benchmarks/'

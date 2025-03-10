@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	expiryGrace     = 5 * time.Minute
-	refreshLoopWait = 30 * time.Second
+	expiryGrace            = 5 * time.Minute
+	defaultRefreshInterval = 30 * time.Second
 )
 
 // TokenManager is the interface for token management
@@ -35,15 +35,16 @@ type TokenManager interface {
 
 // tokenManagerImpl handles token fetching, caching, and refreshing in a background goroutine
 type tokenManagerImpl struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	creds     *google.Credentials
-	cacheFile string
-	audience  string
-	token     atomic.Pointer[oauth2.Token]
-	mu        sync.RWMutex
-	updates   chan struct{}
-	client    *retryablehttp.Client
+	ctx             context.Context
+	cancel          context.CancelFunc
+	creds           *google.Credentials
+	cacheFile       string
+	audience        string
+	token           atomic.Pointer[oauth2.Token]
+	mu              sync.RWMutex
+	updates         chan struct{}
+	client          *retryablehttp.Client
+	refreshInterval time.Duration
 }
 
 // For testing - can be replaced in tests
@@ -150,13 +151,14 @@ func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager
 
 	mctx, cancel := context.WithCancel(ctx)
 	m := &tokenManagerImpl{
-		ctx:       mctx,
-		cancel:    cancel,
-		creds:     creds,
-		cacheFile: cacheFile,
-		audience:  audience,
-		client:    client,
-		updates:   make(chan struct{}, 1),
+		ctx:             mctx,
+		cancel:          cancel,
+		creds:           creds,
+		cacheFile:       cacheFile,
+		audience:        audience,
+		client:          client,
+		updates:         make(chan struct{}, 1),
+		refreshInterval: defaultRefreshInterval,
 	}
 
 	// Try to load initial token from cache
@@ -184,22 +186,11 @@ func (m *tokenManagerImpl) Stop() {
 
 // GetToken returns the current token or blocks until one is available or context is canceled
 func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
-	// Fast path: try to get a valid token without any locks
-	if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
-		token := *tokenPtr
-		return &token, nil
-	}
-
-	// Slow path: no valid token, need to wait for refreshLoop to update it
 	for {
-		// Quick check with read lock
-		m.mu.RLock()
 		if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
 			token := *tokenPtr
-			m.mu.RUnlock()
 			return &token, nil
 		}
-		m.mu.RUnlock()
 
 		select {
 		case <-m.ctx.Done():
@@ -298,7 +289,7 @@ func (m *tokenManagerImpl) refreshLoop() {
 		select {
 		case <-m.ctx.Done():
 			return
-		case <-time.After(refreshLoopWait): // Fixed refresh interval
+		case <-time.After(m.refreshInterval): // Fixed refresh interval
 			m.refresh()
 		}
 	}
