@@ -389,7 +389,6 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 }
 
 // newGoogleAuthenticationClient creates a new HTTP client with Google authentication.
-// e
 func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client) (*http.Client, error) {
 	// Get base transport - use provided or default
 	var baseTransport http.RoundTripper

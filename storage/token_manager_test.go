@@ -490,31 +490,23 @@ func TestTokenManagerImpl(t *testing.T) {
 	})
 
 	t.Run("GetToken respects context cancellation", func(t *testing.T) {
-		// Create token manager with a background context
-		baseCtx := context.Background()
-		manager, err := NewTokenManager(baseCtx, nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		
+		manager, err := NewTokenManager(ctx, nil)
 		if err != nil {
 			t.Fatalf("Failed to create token manager: %v", err)
 		}
-
-		// Use a separate cancelled context for the GetToken call
-		cancelledCtx, cancel := context.WithCancel(context.Background())
-		cancel() // Immediately cancel
-
-		// Force token to nil to force waiting
+		
 		impl := manager.(*tokenManagerImpl)
 		impl.token.Store(nil)
-		impl.ctx = cancelledCtx // Replace the context with our cancelled one
-
-		// Attempt to get token with cancelled context
+		
 		_, err = impl.GetToken()
-
-		// We expect a context error or timeout error
+		
 		if err == nil {
-			t.Error("Expected error due to context cancellation, got none")
+			t.Error("Expected error due to context cancellation")
 		}
-
-		// Clean up
+		
 		manager.Stop()
 	})
 
