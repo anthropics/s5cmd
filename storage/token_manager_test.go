@@ -492,21 +492,21 @@ func TestTokenManagerImpl(t *testing.T) {
 	t.Run("GetToken respects context cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		
+
 		manager, err := NewTokenManager(ctx, nil)
 		if err != nil {
 			t.Fatalf("Failed to create token manager: %v", err)
 		}
-		
+
 		impl := manager.(*tokenManagerImpl)
 		impl.token.Store(nil)
-		
+
 		_, err = impl.GetToken()
-		
+
 		if err == nil {
 			t.Error("Expected error due to context cancellation")
 		}
-		
+
 		manager.Stop()
 	})
 
