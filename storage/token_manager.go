@@ -423,5 +423,6 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 	// Create final client with auth transport
 	return &http.Client{
 		Transport: authTransport,
+		// Do not add a timeout here, as large files take a long time to upload.
 	}, nil
 }
