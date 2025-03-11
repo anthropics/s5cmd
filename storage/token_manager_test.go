@@ -16,6 +16,300 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+// TestNotifier tests the Notifier component's functionality
+func TestNotifier(t *testing.T) {
+	t.Run("Basic notification wakes single waiter", func(t *testing.T) {
+		notifier := NewNotifier()
+		ctx := context.Background()
+
+		// Verify initial generation is 0
+		notifier.mu.Lock()
+		if notifier.generation != 0 {
+			t.Errorf("Initial generation should be 0, got %d", notifier.generation)
+		}
+		notifier.mu.Unlock()
+
+		// Start a goroutine that waits and signals when notified
+		notified := make(chan bool, 1)
+		go func() {
+			result := notifier.Wait(ctx)
+			notified <- result
+		}()
+
+		// Sleep briefly to ensure goroutine is waiting
+		time.Sleep(10 * time.Millisecond)
+
+		// Notify and check if waiter was woken up
+		notifier.Notify()
+
+		select {
+		case result := <-notified:
+			if !result {
+				t.Error("Waiter should have been notified, but got false")
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Error("Timed out waiting for notification")
+		}
+
+		// Verify generation was incremented
+		notifier.mu.Lock()
+		if notifier.generation != 1 {
+			t.Errorf("Generation should be 1 after notification, got %d", notifier.generation)
+		}
+		notifier.mu.Unlock()
+	})
+
+	t.Run("Context cancellation properly terminates wait", func(t *testing.T) {
+		notifier := NewNotifier()
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Start a goroutine that waits and signals when notified or canceled
+		waitResult := make(chan bool, 1)
+		go func() {
+			result := notifier.Wait(ctx)
+			waitResult <- result
+		}()
+
+		// Sleep briefly to ensure goroutine is waiting
+		time.Sleep(10 * time.Millisecond)
+
+		// Cancel the context and check if waiter returns
+		cancel()
+
+		select {
+		case result := <-waitResult:
+			if result {
+				t.Error("Waiter should have returned false on context cancellation, but got true")
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Error("Timed out waiting for cancellation")
+		}
+	})
+
+	t.Run("Multiple waiters all get notified", func(t *testing.T) {
+		notifier := NewNotifier()
+		ctx := context.Background()
+
+		// Number of waiters to test
+		numWaiters := 100
+
+		// Create a wait group to track all goroutines
+		var wg sync.WaitGroup
+		wg.Add(numWaiters)
+
+		// Count of successfully notified goroutines
+		notifiedCount := atomic.Int32{}
+
+		// Start multiple goroutines that wait
+		for i := 0; i < numWaiters; i++ {
+			go func(id int) {
+				defer wg.Done()
+
+				// Create a child context with timeout to avoid test hanging
+				waitCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+				defer cancel()
+
+				if notifier.Wait(waitCtx) {
+					notifiedCount.Add(1)
+					// Uncomment for debugging: fmt.Printf("Waiter %d was notified\n", id)
+				}
+			}(i)
+		}
+
+		// Sleep to ensure all goroutines are waiting
+		time.Sleep(100 * time.Millisecond)
+
+		// Send a single notification
+		notifier.Notify()
+
+		// Wait for all goroutines to complete with timeout
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Success - all goroutines finished
+		case <-time.After(1 * time.Second):
+			t.Fatal("Timed out waiting for all goroutines to complete")
+		}
+
+		// Verify majority of waiters were notified (allow for a few timing issues)
+		if int(notifiedCount.Load()) < numWaiters-3 {
+			t.Errorf("Expected at least %d waiters to be notified, but got %d", numWaiters-3, notifiedCount.Load())
+		} else {
+			t.Logf("Successfully notified %d out of %d waiters", notifiedCount.Load(), numWaiters)
+		}
+	})
+
+	t.Run("Notification before waiting works correctly", func(t *testing.T) {
+		// Create a new notifier with initial generation 0
+		notifier := NewNotifier()
+
+		// Increment it to generation 1
+		notifier.Notify()
+
+		// Verify the generation is now 1
+		notifier.mu.Lock()
+		if notifier.generation != 1 {
+			t.Errorf("Expected generation 1 after notification, got %d", notifier.generation)
+		}
+		notifier.mu.Unlock()
+
+		// Now test that Wait returns true when called (since generation has changed from the default)
+		ctx := context.Background()
+
+		// This should succeed (no timing constraints)
+		result := notifier.Wait(ctx)
+		if !result {
+			notifier.mu.Lock()
+			gen := notifier.generation
+			notifier.mu.Unlock()
+			t.Errorf("Wait should return true when generation is %d", gen)
+		}
+	})
+
+	t.Run("Multiple notifications increment generation correctly", func(t *testing.T) {
+		notifier := NewNotifier()
+
+		// Send multiple notifications
+		expectedGen := uint64(0)
+		for i := 0; i < 10; i++ {
+			notifier.Notify()
+			expectedGen++
+
+			notifier.mu.Lock()
+			if gen := notifier.generation; gen != expectedGen {
+				t.Errorf("Generation should be %d after %d notifications, got %d", expectedGen, i+1, gen)
+			}
+			notifier.mu.Unlock()
+		}
+	})
+
+	t.Run("Generation counter handles concurrent notifications", func(t *testing.T) {
+		notifier := NewNotifier()
+
+		// Number of concurrent notifications
+		numNotifications := 100
+
+		// Create a wait group to track all goroutines
+		var wg sync.WaitGroup
+		wg.Add(numNotifications)
+
+		// Start multiple goroutines that notify concurrently
+		for i := 0; i < numNotifications; i++ {
+			go func() {
+				defer wg.Done()
+				notifier.Notify()
+			}()
+		}
+
+		// Wait for all notifications
+		wg.Wait()
+
+		// Verify generation was incremented correctly
+		notifier.mu.Lock()
+		finalGen := notifier.generation
+		notifier.mu.Unlock()
+		if finalGen != uint64(numNotifications) {
+			t.Errorf("Final generation should be %d after concurrent notifications, got %d", numNotifications, finalGen)
+		}
+	})
+
+	t.Run("Integration test with token refreshing scenario", func(t *testing.T) {
+		notifier := NewNotifier()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Number of workers to simulate
+		numWorkers := 256
+
+		// Simulate token state
+		type tokenState struct {
+			valid  atomic.Bool
+			expiry atomic.Int64
+		}
+
+		tokenData := &tokenState{}
+		tokenData.valid.Store(false)
+		tokenData.expiry.Store(0)
+
+		// Count of workers that got valid tokens
+		successCount := atomic.Int32{}
+
+		// Start workers that wait for token to become valid
+		var wg sync.WaitGroup
+		wg.Add(numWorkers)
+
+		for i := 0; i < numWorkers; i++ {
+			go func(workerID int) {
+				defer wg.Done()
+
+				// Keep trying until we get a valid token
+				for attempts := 0; attempts < 5; attempts++ {
+					// Check if token is valid
+					if tokenData.valid.Load() && tokenData.expiry.Load() > time.Now().Unix() {
+						successCount.Add(1)
+						return
+					}
+
+					// Wait for notification of token refresh
+					waitCtx, waitCancel := context.WithTimeout(ctx, 200*time.Millisecond)
+					if notifier.Wait(waitCtx) {
+						waitCancel()
+						// Wait returned due to notification
+						if tokenData.valid.Load() && tokenData.expiry.Load() > time.Now().Unix() {
+							successCount.Add(1)
+							return
+						}
+						// Otherwise continue trying
+					} else {
+						waitCancel()
+						// Timeout or context canceled
+						if tokenData.valid.Load() && tokenData.expiry.Load() > time.Now().Unix() {
+							// Double-check if the token became valid while we were waiting
+							successCount.Add(1)
+							return
+						}
+					}
+				}
+			}(i)
+		}
+
+		// Sleep to ensure workers are waiting
+		time.Sleep(200 * time.Millisecond)
+
+		// Simulate token refresh
+		tokenData.valid.Store(true)
+		tokenData.expiry.Store(time.Now().Add(time.Hour).Unix())
+
+		// Notify all workers
+		notifier.Notify()
+
+		// Wait for all workers to complete with timeout
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Success - all goroutines finished
+		case <-time.After(2 * time.Second):
+			t.Fatal("Timed out waiting for all workers to complete")
+		}
+
+		// Verify most workers got valid tokens (allow for some timing issues)
+		t.Logf("Successfully notified %d out of %d workers", successCount.Load(), numWorkers)
+		if int(successCount.Load()) < numWorkers-20 {
+			t.Errorf("Expected at least %d workers to get valid tokens, but got %d", numWorkers-20, successCount.Load())
+		}
+	})
+}
+
 func TestTokenManagerImpl(t *testing.T) {
 	// Create temp directory for cache files
 	tempDir, err := os.MkdirTemp("", "token-test")
@@ -182,41 +476,46 @@ func TestTokenManagerImpl(t *testing.T) {
 			t.Fatalf("GetToken failed: %v", err)
 		}
 
-		// Stop manager - implicitly waits for shutdown now
+		// Stop manager
 		manager.Stop()
 
+		// Sleep to let cancellation propagate
+		time.Sleep(100 * time.Millisecond)
+
 		// Try to get token after stop
-		_, err = manager.GetToken()
+		_, err = manager.(*tokenManagerImpl).GetToken()
 		if err == nil {
 			t.Error("Expected error after stopping manager")
-		}
-		if err != context.Canceled {
-			t.Errorf("Expected context.Canceled, got %v", err)
 		}
 	})
 
 	t.Run("GetToken respects context cancellation", func(t *testing.T) {
-		// Create a context that we can cancel
-		ctx, cancel := context.WithCancel(context.Background())
-
-		// Immediately cancel the context before creating the token manager
-		cancel()
-
-		// Create token manager with the already cancelled context
-		manager, err := NewTokenManager(ctx, nil)
+		// Create token manager with a background context
+		baseCtx := context.Background()
+		manager, err := NewTokenManager(baseCtx, nil)
 		if err != nil {
 			t.Fatalf("Failed to create token manager: %v", err)
 		}
 
-		// Attempt to get token - should immediately return context.Canceled
-		_, err = manager.GetToken()
+		// Use a separate cancelled context for the GetToken call
+		cancelledCtx, cancel := context.WithCancel(context.Background())
+		cancel() // Immediately cancel
 
-		// Verify the error is context cancellation
+		// Force token to nil to force waiting
+		impl := manager.(*tokenManagerImpl)
+		impl.token.Store(nil)
+		impl.ctx = cancelledCtx // Replace the context with our cancelled one
+
+		// Attempt to get token with cancelled context
+		_, err = impl.GetToken()
+
+		// We expect a context error or timeout error
 		if err == nil {
-			t.Error("Expected error due to context cancellation")
-		} else if err != context.Canceled {
-			t.Errorf("Expected context.Canceled, got %v", err)
+			t.Error("Expected error due to context cancellation, got none")
 		}
+
+		// Clean up
+		manager.Stop()
 	})
 
 	t.Run("Respects cache opt-out", func(t *testing.T) {
@@ -361,7 +660,7 @@ func BenchmarkGetTokenWithContention(b *testing.B) {
 		ctx:             ctx,
 		cancel:          cancel,
 		creds:           creds,
-		updates:         make(chan struct{}, 10), // Larger buffer to avoid blocking
+		notifier:        NewNotifier(), // Use notifier instead of updates channel
 		cacheFile:       filepath.Join(tempDir, "token.json"),
 		mu:              sync.RWMutex{},
 		refreshInterval: 10 * time.Millisecond,

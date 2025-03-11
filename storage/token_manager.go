@@ -27,13 +27,12 @@ const (
 	defaultRefreshInterval = 30 * time.Second
 )
 
-// TokenManager is the interface for token management
+// TokenManager handles OAuth token retrieval and refreshing.
 type TokenManager interface {
 	GetToken() (*oauth2.Token, error)
 	Stop()
 }
 
-// tokenManagerImpl handles token fetching, caching, and refreshing in a background goroutine
 type tokenManagerImpl struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -41,8 +40,8 @@ type tokenManagerImpl struct {
 	cacheFile       string
 	audience        string
 	token           atomic.Pointer[oauth2.Token]
+	notifier        *Notifier
 	mu              sync.RWMutex
-	updates         chan struct{}
 	client          *retryablehttp.Client
 	refreshInterval time.Duration
 }
@@ -157,8 +156,8 @@ func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager
 		cacheFile:       cacheFile,
 		audience:        audience,
 		client:          client,
-		updates:         make(chan struct{}, 1),
 		refreshInterval: defaultRefreshInterval,
+		notifier:        NewNotifier(),
 	}
 
 	// Try to load initial token from cache
@@ -182,9 +181,13 @@ func NewTokenManager(ctx context.Context, baseClient *http.Client) (TokenManager
 
 func (m *tokenManagerImpl) Stop() {
 	m.cancel()
+
+	// Force GetToken calls to fail immediately even if a valid token exists
+	m.token.Store(nil)
 }
 
-// GetToken returns the current token or blocks until one is available or context is canceled
+// GetToken returns a valid token or blocks until one is available or context is canceled.
+// Uses the notifier to wake all waiting goroutines simultaneously when a token refresh occurs.
 func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
 	for {
 		if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
@@ -192,16 +195,18 @@ func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
 			return &token, nil
 		}
 
-		select {
-		case <-m.ctx.Done():
+		notified := m.notifier.Wait(m.ctx)
+		if !notified {
 			return nil, m.ctx.Err()
-		case <-m.updates:
-			// Continue the loop
+		}
+
+		if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
+			token := *tokenPtr
+			return &token, nil
 		}
 	}
 }
 
-// refresh gets a new token and updates both memory and file cache while holding lock
 func (m *tokenManagerImpl) refresh() error {
 	if err := m.ensureDirectoryExists(); err != nil {
 		return fmt.Errorf("failed to create cache directory: %v", err)
@@ -214,7 +219,7 @@ func (m *tokenManagerImpl) refresh() error {
 	}
 	defer file.Close()
 
-	// First check if someone else already refreshed while we were waiting
+	// Check if another process already refreshed the token
 	data, err := io.ReadAll(file)
 	if err == nil && len(data) > 0 {
 		var cachedInfo CachedTokenInfo
@@ -223,16 +228,8 @@ func (m *tokenManagerImpl) refresh() error {
 			cachedInfo.Token != nil &&
 			cachedInfo.Token.Valid() &&
 			time.Until(cachedInfo.Token.Expiry) > 5*time.Minute {
-			// Use token that was refreshed by another process
 			m.token.Store(cachedInfo.Token)
-
-			// Notify waiters of new token
-			select {
-			case m.updates <- struct{}{}:
-			default:
-				// Channel full or no waiters, that's OK
-			}
-
+			m.notifier.Notify()
 			return nil
 		}
 	}
@@ -249,17 +246,10 @@ func (m *tokenManagerImpl) refresh() error {
 		return err
 	}
 
-	// Store atomically
 	m.token.Store(newToken)
+	m.notifier.Notify()
 
-	// Notify waiters of new token
-	select {
-	case m.updates <- struct{}{}:
-	default:
-		// Channel full or no waiters, that's OK
-	}
-
-	// Write new token to file cache
+	// Cache token to file for other processes
 	cachedInfo := CachedTokenInfo{
 		Token:    newToken,
 		Audience: m.audience,
@@ -270,7 +260,6 @@ func (m *tokenManagerImpl) refresh() error {
 		return fmt.Errorf("failed to marshal token: %v", err)
 	}
 
-	// Truncate and write file
 	if err := file.Truncate(0); err != nil {
 		return err
 	}
