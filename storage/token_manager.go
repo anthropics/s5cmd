@@ -199,11 +199,6 @@ func (m *tokenManagerImpl) GetToken() (*oauth2.Token, error) {
 		if !notified {
 			return nil, m.ctx.Err()
 		}
-
-		if tokenPtr := m.token.Load(); tokenPtr != nil && tokenPtr.Valid() {
-			token := *tokenPtr
-			return &token, nil
-		}
 	}
 }
 
@@ -394,6 +389,7 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 }
 
 // newGoogleAuthenticationClient creates a new HTTP client with Google authentication.
+// e
 func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client) (*http.Client, error) {
 	// Get base transport - use provided or default
 	var baseTransport http.RoundTripper
@@ -408,7 +404,7 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 	if tokenClient == nil {
 		tokenClient = &http.Client{
 			Transport: baseTransport,
-			Timeout:   30 * time.Second,
+			Timeout:   5 * time.Minute,
 		}
 	}
 
@@ -427,6 +423,5 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 	// Create final client with auth transport
 	return &http.Client{
 		Transport: authTransport,
-		Timeout:   30 * time.Second,
 	}, nil
 }
