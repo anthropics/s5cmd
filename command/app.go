@@ -99,6 +99,10 @@ var app = &cli.App{
 			Name:  "retry-on-forbidden",
 			Usage: "retry for Forbidden error code",
 		},
+		&cli.StringSliceFlag{
+			Name:  "header",
+			Usage: "add custom header to S3 requests (can be specified multiple times, format: \"key=value\")",
+		},
 	},
 	Before: func(c *cli.Context) error {
 		retryCount := c.Int("retry-count")
@@ -231,6 +235,15 @@ var app = &cli.App{
 
 // NewStorageOpts creates storage.Options object from the given context.
 func NewStorageOpts(c *cli.Context) storage.Options {
+	// Parse any custom headers from the command line
+	customHeaders := make(map[string]string)
+	for _, header := range c.StringSlice("header") {
+		parts := strings.SplitN(header, "=", 2)
+		if len(parts) == 2 {
+			customHeaders[parts[0]] = parts[1]
+		}
+	}
+
 	return storage.Options{
 		DryRun:                 c.Bool("dry-run"),
 		Endpoint:               c.String("endpoint-url"),
@@ -245,6 +258,7 @@ func NewStorageOpts(c *cli.Context) storage.Options {
 		NoSuchUploadRetryCount: c.Int("no-such-upload-retry-count"),
 		AuthGoogleADC:          c.Bool("auth-google-adc"),
 		RetryForbidden:         c.Bool("retry-on-forbidden"),
+		CustomHeaders:          customHeaders,
 	}
 }
 

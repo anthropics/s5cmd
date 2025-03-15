@@ -901,6 +901,108 @@ func TestS3PutEncryptionRequest(t *testing.T) {
 	}
 }
 
+func TestS3CustomHeaders(t *testing.T) {
+	testcases := []struct {
+		name           string
+		customHeaders  map[string]string
+		expectedHeader string
+		expectedValue  string
+	}{
+		{
+			name:          "no custom headers",
+			customHeaders: nil,
+		},
+		{
+			name: "single custom header",
+			customHeaders: map[string]string{
+				"X-Amz-Request-Payer": "requester",
+			},
+			expectedHeader: "X-Amz-Request-Payer",
+			expectedValue:  "requester",
+		},
+		{
+			name: "multiple custom headers",
+			customHeaders: map[string]string{
+				"X-Amz-Request-Payer": "requester",
+				"X-Amz-Content-Sha256": "UNSIGNED-PAYLOAD",
+			},
+			expectedHeader: "X-Amz-Content-Sha256",
+			expectedValue:  "UNSIGNED-PAYLOAD",
+		},
+	}
+
+	u, err := url.New("s3://bucket/key")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	for _, tc := range testcases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			mockAPI := s3.New(unit.Session)
+
+			mockAPI.Handlers.Unmarshal.Clear()
+			mockAPI.Handlers.UnmarshalMeta.Clear()
+			mockAPI.Handlers.UnmarshalError.Clear()
+			mockAPI.Handlers.Send.Clear()
+
+			// Check if custom headers are added to the request
+			mockAPI.Handlers.Build.PushBack(func(r *request.Request) {
+				if tc.customHeaders == nil {
+					// If no custom headers are expected, check that none were added
+					for header := range r.HTTPRequest.Header {
+						if strings.HasPrefix(header, "X-Amz-") && header != "X-Amz-Date" && header != "X-Amz-Security-Token" {
+							t.Errorf("Unexpected custom header found: %s", header)
+						}
+					}
+					return
+				}
+
+				// Verify the expected header exists with the right value
+				for k, v := range tc.customHeaders {
+					if r.HTTPRequest.Header.Get(k) != v {
+						t.Errorf("Expected header %s with value %s, got %s", 
+							k, v, r.HTTPRequest.Header.Get(k))
+					}
+				}
+			})
+
+			// Mock successful response
+			mockAPI.Handlers.Send.PushBack(func(r *request.Request) {
+				r.HTTPResponse = &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader("")),
+				}
+			})
+
+			// Create mock S3 client with custom headers
+			mockS3 := &S3{
+				api:           mockAPI,
+				uploader:      s3manager.NewUploaderWithClient(mockAPI),
+				customHeaders: tc.customHeaders,
+			}
+
+			// Test with List operation
+			for range mockS3.List(context.Background(), u, true) {
+				// Just drain the channel
+			}
+
+			// Test with Get operation
+			_, err = mockS3.Get(context.Background(), u)
+			if err != nil {
+				t.Errorf("Expected no error, got: %v", err)
+			}
+
+			// Test with Put operation
+			metadata := Metadata{}
+			err = mockS3.Put(context.Background(), strings.NewReader("test"), u, metadata, 1, 5242880)
+			if err != nil {
+				t.Errorf("Expected no error, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestS3listObjectsV2(t *testing.T) {
 	const (
 		numObjectsToReturn = 10100
