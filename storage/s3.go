@@ -1224,7 +1224,7 @@ func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.
 		httpClient = insecureHTTPClient
 	}
 	if opts.AuthGoogleADC {
-		httpClient, err = newGoogleAuthenticationClient(ctx, httpClient)
+		httpClient, err = newGoogleAuthenticationClient(ctx, httpClient, opts.Headers)
 		if err != nil {
 			return nil, err
 		}

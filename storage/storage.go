@@ -76,6 +76,7 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, erro
 		region:                 opts.region,
 		AuthGoogleADC:          opts.AuthGoogleADC,
 		RetryForbidden:         opts.RetryForbidden,
+		Headers:                opts.Headers,
 	}
 
 	return newS3Storage(ctx, newOpts)
@@ -105,6 +106,12 @@ type Options struct {
 	region                 string
 	AuthGoogleADC          bool
 	RetryForbidden         bool
+	Headers                Headers
+}
+
+type Headers struct {
+	// If you want more headers, go ahead. And compile. :))))))
+	Host	string
 }
 
 func (o *Options) SetRegion(region string) {

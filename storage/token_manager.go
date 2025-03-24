@@ -340,6 +340,7 @@ func (c *contextTokenSource) Token() (*oauth2.Token, error) {
 type GoogleAuthRoundTripper struct {
 	tokenManager TokenManager
 	transport    http.RoundTripper
+	headers      Headers
 }
 
 // RoundTrip implements the http.RoundTripper interface.
@@ -353,6 +354,11 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 		}
 		req.Header.Del(oldKey)
 		req.Header[newKey] = values
+	}
+
+	// Add custom headers
+	if c.headers.Host != "" {
+		req.Header.Set("Host", c.headers.Host)
 	}
 
 	// Get token from manager
@@ -389,7 +395,7 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 }
 
 // newGoogleAuthenticationClient creates a new HTTP client with Google authentication.
-func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client) (*http.Client, error) {
+func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client, headers Headers) (*http.Client, error) {
 	// Get base transport - use provided or default
 	var baseTransport http.RoundTripper
 	if baseClient != nil && baseClient.Transport != nil {
@@ -417,6 +423,7 @@ func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client)
 	authTransport := &GoogleAuthRoundTripper{
 		transport:    baseTransport,
 		tokenManager: tokenManager,
+		headers:      headers,
 	}
 
 	// Create final client with auth transport
