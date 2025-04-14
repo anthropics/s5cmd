@@ -1,6 +1,8 @@
 module github.com/peak/s5cmd/v2
 
-go 1.19
+go 1.23.0
+
+toolchain go1.24.2
 
 require (
 	github.com/aws/aws-sdk-go v1.44.256
@@ -18,7 +20,7 @@ require (
 	github.com/termie/go-shutil v0.0.0-20140729215957-bcacb06fecae
 	github.com/urfave/cli/v2 v2.11.2
 	go.uber.org/mock v0.4.0
-	golang.org/x/oauth2 v0.25.0
+	golang.org/x/oauth2 v0.27.0
 	gotest.tools/v3 v3.0.3
 )
 
