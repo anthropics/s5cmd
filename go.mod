@@ -2,8 +2,6 @@ module github.com/peak/s5cmd/v2
 
 go 1.23
 
-toolchain go1.24.2
-
 require (
 	github.com/aws/aws-sdk-go v1.44.256
 	github.com/cheggaaa/pb/v3 v3.1.4
