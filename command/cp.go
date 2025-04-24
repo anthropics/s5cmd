@@ -375,8 +375,7 @@ func NewCopy(c *cli.Context, deleteSource bool) (*Copy, error) {
 		printError(fullCommand, c.Command.Name, err)
 		return nil, err
 	}
-
-	copy := &Copy{
+	return &Copy{
 		src:          src,
 		dst:          dst,
 		op:           c.Command.Name,
@@ -413,8 +412,7 @@ func NewCopy(c *cli.Context, deleteSource bool) (*Copy, error) {
 		dstRegion: c.String("destination-region"),
 
 		storageOpts: NewStorageOpts(c),
-	}
-	return copy, nil
+	}, nil
 }
 
 const fdlimitWarning = `
@@ -762,15 +760,7 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, ex
 
 // isCrossCloudCopy checks if the source and destination are from different cloud providers
 func isCrossCloudCopy(srcurl, dsturl *url.URL) bool {
-	if !srcurl.IsRemote() || !dsturl.IsRemote() {
-		return false
-	}
-
-	// Different schemes (s3:// vs gs://)
-	if srcurl.Scheme != dsturl.Scheme {
-		return true
-	}
-	return false
+	return srcurl.IsRemote() && dsturl.IsRemote() && (srcurl.Scheme != dsturl.Scheme)
 }
 
 // doCrossCloudCopy handles copying between different cloud providers by downloading to temp then uploading
