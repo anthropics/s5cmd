@@ -83,15 +83,7 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, erro
 		S3CredentialFile:       opts.S3CredentialFile,
 		GCSCredentialFile:      opts.GCSCredentialFile,
 	}
-	newOpts.FixForUrl(url)
-	log.Debug(
-		log.DebugMessage{
-			Operation: "NewRemoteClient",
-			Command:   url.Scheme,
-			// json
-			Err: fmt.Sprintf("NewRemoteClient: json: %s url: %s", strutil.JSON(newOpts), url),
-		},
-	)
+	newOpts.fixForUrl(url)
 
 	return newS3Storage(ctx, newOpts)
 }
@@ -132,15 +124,15 @@ func (o *Options) SetRegion(region string) {
 	o.region = region
 }
 
-func (o *Options) FixForUrl(url *url.URL) {
-	if url.IsS3() {
+func (o *Options) fixForUrl(url *url.URL) {
+	if url.Scheme == "s3" {
 		if o.Endpoint == "" {
 			o.Endpoint = o.S3Endpoint
 		}
 		if o.CredentialFile == "" {
 			o.CredentialFile = o.S3CredentialFile
 		}
-	} else if url.IsGS() {
+	} else if url.Scheme == "gs" {
 		if o.Endpoint == "" {
 			o.Endpoint = o.GCSEndpoint
 		}
