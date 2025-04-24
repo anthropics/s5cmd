@@ -60,10 +60,13 @@ func NewLocalClient(opts Options) *Filesystem {
 }
 
 func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, error) {
+	// log the opts
 	newOpts := Options{
 		MaxRetries:             opts.MaxRetries,
 		NoSuchUploadRetryCount: opts.NoSuchUploadRetryCount,
 		Endpoint:               opts.Endpoint,
+		S3Endpoint:             opts.S3Endpoint,
+		GCSEndpoint:            opts.GCSEndpoint,
 		NoVerifySSL:            opts.NoVerifySSL,
 		DryRun:                 opts.DryRun,
 		NoSignRequest:          opts.NoSignRequest || opts.AuthGoogleADC,
@@ -71,16 +74,27 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, erro
 		RequestPayer:           opts.RequestPayer,
 		Profile:                opts.Profile,
 		CredentialFile:         opts.CredentialFile,
+		S3CredentialFile:       opts.S3CredentialFile,
+		GCSCredentialFile:      opts.GCSCredentialFile,
 		LogLevel:               opts.LogLevel,
 		bucket:                 url.Bucket,
 		region:                 opts.region,
 		AuthGoogleADC:          opts.AuthGoogleADC,
+		UseGoogleADCForGcs:     opts.UseGoogleADCForGcs,
 		RetryForbidden:         opts.RetryForbidden,
 	}
+	newOpts.FixForUrl(url)
+	log.Debug(
+		log.DebugMessage{
+			Operation: "NewRemoteClient",
+			Command:   url.Scheme,
+			// json
+			Err: fmt.Sprintf("NewRemoteClient: json: %s url: %s", strutil.JSON(newOpts), url),
+		},
+	)
 
 	return newS3Storage(ctx, newOpts)
 }
-
 func NewClient(ctx context.Context, url *url.URL, opts Options) (Storage, error) {
 	if url.IsRemote() {
 		return NewRemoteClient(ctx, url, opts)
@@ -93,6 +107,8 @@ type Options struct {
 	MaxRetries             int
 	NoSuchUploadRetryCount int
 	Endpoint               string
+	S3Endpoint             string
+	GCSEndpoint            string
 	NoVerifySSL            bool
 	DryRun                 bool
 	NoSignRequest          bool
@@ -101,14 +117,40 @@ type Options struct {
 	RequestPayer           string
 	Profile                string
 	CredentialFile         string
+	S3CredentialFile       string
+	GCSCredentialFile      string
 	bucket                 string
 	region                 string
 	AuthGoogleADC          bool
+	UseGoogleADCForGcs     bool
 	RetryForbidden         bool
 }
 
 func (o *Options) SetRegion(region string) {
 	o.region = region
+}
+
+func (o *Options) FixForUrl(url *url.URL) {
+	if url.IsS3() {
+		if o.S3Endpoint != "" {
+			o.Endpoint = o.S3Endpoint
+		}
+		if o.S3CredentialFile != "" {
+			o.CredentialFile = o.S3CredentialFile
+		}
+	} else if url.IsGS() {
+		if o.GCSEndpoint != "" {
+			o.Endpoint = o.GCSEndpoint
+		}
+		o.CredentialFile = o.GCSCredentialFile
+		o.Profile = ""
+		o.NoSignRequest = true
+		//if o.GCSCredentialFile != "" {
+		//}
+		if o.UseGoogleADCForGcs {
+			o.AuthGoogleADC = true
+		}
+	}
 }
 
 // Object is a generic type which contains metadata for storage items.

@@ -158,6 +158,14 @@ func (u *URL) IsVersioned() bool {
 	return u.AllVersions || u.VersionID != ""
 }
 
+func (u *URL) IsS3() bool {
+	return u.Scheme == "s3"
+}
+
+func (u *URL) IsGS() bool {
+	return u.Scheme == "gs"
+}
+
 // Absolute returns the absolute URL format of the object.
 func (u *URL) Absolute() string {
 	if !u.IsRemote() {
