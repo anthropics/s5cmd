@@ -85,6 +85,14 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, erro
 	}
 	newOpts.fixForUrl(url)
 
+	log.Debug(
+		log.DebugMessage{
+			Operation: "storage.NewRemoteClient",
+			Command:   fmt.Sprintf("client options for url %s: %+v", url.String(), newOpts),
+			Err:       "",
+		},
+	)
+
 	return newS3Storage(ctx, newOpts)
 }
 func NewClient(ctx context.Context, url *url.URL, opts Options) (Storage, error) {
