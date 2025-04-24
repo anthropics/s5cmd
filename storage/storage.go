@@ -107,8 +107,6 @@ type Options struct {
 	MaxRetries             int
 	NoSuchUploadRetryCount int
 	Endpoint               string
-	S3Endpoint             string
-	GCSEndpoint            string
 	NoVerifySSL            bool
 	DryRun                 bool
 	NoSignRequest          bool
@@ -117,13 +115,17 @@ type Options struct {
 	RequestPayer           string
 	Profile                string
 	CredentialFile         string
-	S3CredentialFile       string
-	GCSCredentialFile      string
 	bucket                 string
 	region                 string
 	AuthGoogleADC          bool
-	UseGoogleADCForGcs     bool
 	RetryForbidden         bool
+	// all of these are anthropic-specific fields that _mutate_ the rest of the options depending on the url
+	// this is kinda a mess but I don't feel like remaking everything so whatever
+	S3Endpoint         string
+	GCSEndpoint        string
+	S3CredentialFile   string
+	GCSCredentialFile  string
+	UseGoogleADCForGcs bool
 }
 
 func (o *Options) SetRegion(region string) {
@@ -132,21 +134,19 @@ func (o *Options) SetRegion(region string) {
 
 func (o *Options) FixForUrl(url *url.URL) {
 	if url.IsS3() {
-		if o.S3Endpoint != "" {
+		if o.Endpoint == "" {
 			o.Endpoint = o.S3Endpoint
 		}
-		if o.S3CredentialFile != "" {
+		if o.CredentialFile == "" {
 			o.CredentialFile = o.S3CredentialFile
 		}
 	} else if url.IsGS() {
-		if o.GCSEndpoint != "" {
+		if o.Endpoint == "" {
 			o.Endpoint = o.GCSEndpoint
 		}
 		o.CredentialFile = o.GCSCredentialFile
 		o.Profile = ""
 		o.NoSignRequest = true
-		//if o.GCSCredentialFile != "" {
-		//}
 		if o.UseGoogleADCForGcs {
 			o.AuthGoogleADC = true
 		}
