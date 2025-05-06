@@ -1,3 +1,5 @@
+version: 2
+
 before:
   hooks:
     - make build
@@ -42,10 +44,10 @@ changelog:
       - Merge branch
 
 brews:
-  - tap:
+  - repository:
       owner: peak
       name: homebrew-tap
-    folder: Formula
+    directory: Formula
     name: s5cmd
     description: Parallel S3 and local filesystem execution tool
     homepage: https://github.com/peak/s5cmd
