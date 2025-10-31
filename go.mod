@@ -3,6 +3,7 @@ module github.com/peak/s5cmd/v2
 go 1.19
 
 require (
+	cloud.google.com/go/storage v1.46.0
 	github.com/aws/aws-sdk-go v1.44.334
 	github.com/cheggaaa/pb/v3 v3.1.4
 	github.com/google/go-cmp v0.6.0
@@ -19,6 +20,7 @@ require (
 	github.com/urfave/cli/v2 v2.11.2
 	go.uber.org/mock v0.4.0
 	golang.org/x/oauth2 v0.25.0
+	google.golang.org/api v0.203.0
 	gotest.tools/v3 v3.0.3
 )
 
