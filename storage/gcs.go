@@ -7,12 +7,10 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 
-	"github.com/peak/s5cmd/v2/log"
 	"github.com/peak/s5cmd/v2/storage/url"
 )
 
@@ -20,7 +18,6 @@ import (
 type GCS struct {
 	client *storage.Client
 	dryRun bool
-	log    log.Logger
 }
 
 // NewGRPCClient creates a new GCS client with gRPC support.
@@ -34,7 +31,6 @@ func NewGRPCClient(ctx context.Context, opts Options) (*GCS, error) {
 	return &GCS{
 		client: client,
 		dryRun: opts.DryRun,
-		log:    log.New(opts.LogLevel),
 	}, nil
 }
 

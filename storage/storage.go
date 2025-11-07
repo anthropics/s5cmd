@@ -59,11 +59,9 @@ func NewLocalClient(opts Options) *Filesystem {
 	return &Filesystem{dryRun: opts.DryRun}
 }
 
-func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (Storage, error) {
-	// If gRPC is enabled and this is a GCS URL, use the native GCS client
-	if opts.UseGRPC && url.Scheme == "gs" {
-		return NewGRPCClient(ctx, opts)
-	}
+func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, error) {
+	// Note: gRPC GCS client is created separately via NewClient when needed
+	// This function returns *S3 for backward compatibility with commands that use S3-specific methods
 
 	newOpts := Options{
 		MaxRetries:             opts.MaxRetries,
@@ -89,6 +87,10 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (Storage, 
 
 func NewClient(ctx context.Context, url *url.URL, opts Options) (Storage, error) {
 	if url.IsRemote() {
+		// If gRPC is enabled and this is a GCS URL, use the native GCS client
+		if opts.UseGRPC && url.Scheme == "gs" {
+			return NewGRPCClient(ctx, opts)
+		}
 		return NewRemoteClient(ctx, url, opts)
 	}
 	return NewLocalClient(opts), nil
