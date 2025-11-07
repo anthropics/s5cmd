@@ -23,6 +23,7 @@ type GCS struct {
 // NewGRPCClient creates a new GCS client with gRPC support.
 func NewGRPCClient(ctx context.Context, opts Options) (*GCS, error) {
 	// Create gRPC-enabled client
+	fmt.Fprintf(os.Stderr, "INFO: Creating GCS client with native gRPC transport (DirectPath enabled)\n")
 	client, err := storage.NewGRPCClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client: %w", err)
