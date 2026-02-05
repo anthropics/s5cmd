@@ -605,7 +605,7 @@ func (s *S3) singleCopy(ctx context.Context, from, to *url.URL, metadata Metadat
 		input.Metadata = m
 	}
 
-	_, err := s.api.CopyObject(input)
+	_, err := s.api.CopyObjectWithContext(ctx, input)
 	return err
 }
 
