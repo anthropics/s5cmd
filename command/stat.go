@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/hashicorp/go-multierror"
@@ -13,6 +14,11 @@ import (
 	"github.com/peak/s5cmd/v2/storage/url"
 	"github.com/peak/s5cmd/v2/strutil"
 )
+
+// statNotFoundExitCode is returned when at least one object was not found
+// and no other class of error occurred, letting callers distinguish a clean
+// miss from auth/network/validation failures, which exit 1.
+const statNotFoundExitCode = 2
 
 var statHelpTemplate = `Name:
 	{{.HelpName}} - {{.Usage}}
@@ -116,13 +122,15 @@ type Stat struct {
 
 // Run retrieves and prints metadata for each source object.
 func (s Stat) Run(ctx context.Context) error {
-	var merror error
+	var merror *multierror.Error
+	allNotFound := true
 
 	for _, src := range s.srcs {
 		client, err := storage.NewRemoteClient(ctx, src, s.storageOpts)
 		if err != nil {
 			merror = multierror.Append(merror, err)
 			printError(s.fullCommand, s.op, err)
+			allNotFound = false
 			continue
 		}
 
@@ -130,6 +138,10 @@ func (s Stat) Run(ctx context.Context) error {
 		if err != nil {
 			merror = multierror.Append(merror, err)
 			printError(s.fullCommand, s.op, err)
+			var nf *storage.ErrGivenObjectNotFound
+			if !errors.As(err, &nf) {
+				allNotFound = false
+			}
 			continue
 		}
 
@@ -141,6 +153,12 @@ func (s Stat) Run(ctx context.Context) error {
 		log.Info(msg)
 	}
 
+	if merror.ErrorOrNil() == nil {
+		return nil
+	}
+	if allNotFound {
+		return cli.Exit("", statNotFoundExitCode)
+	}
 	return merror
 }
 

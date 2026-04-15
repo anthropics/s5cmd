@@ -70,7 +70,7 @@ func TestStatS3ObjectNotFound(t *testing.T) {
 	cmd := s5cmd("stat", src)
 	result := icmd.RunCmd(cmd)
 
-	result.Assert(t, icmd.Expected{ExitCode: 1})
+	result.Assert(t, icmd.Expected{ExitCode: 2})
 	assertLines(t, result.Stderr(), map[int]compareFunc{
 		0: match(fmt.Sprintf(`ERROR "stat s3://%s/missing\.txt":.*not found`, bucket)),
 	})

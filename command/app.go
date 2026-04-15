@@ -185,16 +185,17 @@ var app = &cli.App{
 
 		return nil
 	},
+	// Suppress the default HandleExitCoder so a returned cli.ExitCoder
+	// propagates back to main() instead of calling os.Exit before the
+	// After callback has flushed the async log channel.
+	ExitErrHandler: func(*cli.Context, error) {},
 	CommandNotFound: func(c *cli.Context, command string) {
 		msg := log.ErrorMessage{
 			Command: command,
 			Err:     "command not found",
 		}
 		log.Error(msg)
-
-		// After callback is not called if app exists with cli.Exit.
-		parallel.Close()
-		log.Close()
+		// The After callback handles parallel.Close() / log.Close().
 	},
 	OnUsageError: func(c *cli.Context, err error, isSubcommand bool) error {
 		if err != nil {
