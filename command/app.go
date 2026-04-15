@@ -258,6 +258,7 @@ func Commands() []*cli.Command {
 		NewRemoveBucketCommand(),
 		NewSelectCommand(),
 		NewSizeCommand(),
+		NewStatCommand(),
 		NewCatCommand(),
 		NewPipeCommand(),
 		NewRunCommand(),
