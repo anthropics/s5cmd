@@ -51,11 +51,6 @@ func NewStatCommand() *cli.Command {
 				Aliases: []string{"H"},
 				Usage:   "human-readable output for object sizes",
 			},
-			&cli.BoolFlag{
-				Name:    "storage-class",
-				Aliases: []string{"s"},
-				Usage:   "display full name of the object class",
-			},
 			&cli.StringFlag{
 				Name:  "version-id",
 				Usage: "use the specified version of an object",
@@ -95,9 +90,8 @@ func NewStatCommand() *cli.Command {
 				op:          op,
 				fullCommand: fullCommand,
 
-				showEtag:         c.Bool("etag"),
-				humanize:         c.Bool("humanize"),
-				showStorageClass: c.Bool("storage-class"),
+				showEtag: c.Bool("etag"),
+				humanize: c.Bool("humanize"),
 
 				storageOpts: NewStorageOpts(c),
 			}.Run(c.Context)
@@ -114,9 +108,8 @@ type Stat struct {
 	fullCommand string
 
 	// flags
-	showEtag         bool
-	humanize         bool
-	showStorageClass bool
+	showEtag bool
+	humanize bool
 
 	storageOpts storage.Options
 }
@@ -141,10 +134,9 @@ func (s Stat) Run(ctx context.Context) error {
 		}
 
 		msg := StatMessage{
-			Object:           object,
-			showEtag:         s.showEtag,
-			showHumanized:    s.humanize,
-			showStorageClass: s.showStorageClass,
+			Object:        object,
+			showEtag:      s.showEtag,
+			showHumanized: s.humanize,
 		}
 		log.Info(msg)
 	}
@@ -156,9 +148,8 @@ func (s Stat) Run(ctx context.Context) error {
 type StatMessage struct {
 	Object *storage.Object `json:"object"`
 
-	showEtag         bool
-	showHumanized    bool
-	showStorageClass bool
+	showEtag      bool
+	showHumanized bool
 }
 
 // humanize is a helper function to humanize bytes.
@@ -172,7 +163,7 @@ func (s StatMessage) humanize() string {
 // String returns the string representation of StatMessage.
 func (s StatMessage) String() string {
 	var etag string
-	var listFormat = "%19s %2s"
+	var listFormat = "%19s"
 
 	if s.showEtag {
 		etag = s.Object.Etag
@@ -188,15 +179,9 @@ func (s StatMessage) String() string {
 		listFormat = listFormat + " %s%s"
 	}
 
-	stclass := ""
-	if s.showStorageClass {
-		stclass = fmt.Sprintf("%v", s.Object.StorageClass)
-	}
-
 	return fmt.Sprintf(
 		listFormat,
 		s.Object.ModTime.Format(dateFormat),
-		stclass,
 		etag,
 		s.humanize(),
 		s.Object.URL.String(),
@@ -206,12 +191,16 @@ func (s StatMessage) String() string {
 
 // JSON returns the JSON representation of StatMessage.
 func (s StatMessage) JSON() string {
-	return strutil.JSON(s.Object)
+	return s.Object.JSON()
 }
 
 func validateStatCommand(c *cli.Context) error {
 	if c.Args().Len() < 1 {
 		return fmt.Errorf("expected at least one argument")
+	}
+
+	if c.String("version-id") != "" && c.Args().Len() > 1 {
+		return fmt.Errorf("version-id flag can only be used with a single source")
 	}
 
 	for _, arg := range c.Args().Slice() {
