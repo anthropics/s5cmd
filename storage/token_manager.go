@@ -390,12 +390,14 @@ func (c *GoogleAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, e
 
 // newGoogleAuthenticationClient creates a new HTTP client with Google authentication.
 func newGoogleAuthenticationClient(ctx context.Context, baseClient *http.Client) (*http.Client, error) {
-	// Get base transport - use provided or default
+	// Get base transport - use provided or a clone of the default. Cloning
+	// avoids mutating the process-global http.DefaultTransport when the AWS
+	// SDK installs a custom RootCAs pool (AWS_CA_BUNDLE) on this transport.
 	var baseTransport http.RoundTripper
 	if baseClient != nil && baseClient.Transport != nil {
 		baseTransport = baseClient.Transport
 	} else {
-		baseTransport = http.DefaultTransport
+		baseTransport = http.DefaultTransport.(*http.Transport).Clone()
 	}
 
 	// Use provided client or create new one for token operations
