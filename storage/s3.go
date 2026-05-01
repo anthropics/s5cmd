@@ -1223,11 +1223,18 @@ func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.
 	if opts.NoVerifySSL {
 		httpClient = insecureHTTPClient
 	}
+	var googleAuthRT *GoogleAuthRoundTripper
 	if opts.AuthGoogleADC {
 		httpClient, err = newGoogleAuthenticationClient(ctx, httpClient)
 		if err != nil {
 			return nil, err
 		}
+		// aws-sdk-go's session loader type-asserts HTTPClient.Transport to
+		// *http.Transport when applying AWS_CA_BUNDLE, which fails on
+		// *GoogleAuthRoundTripper. Expose the inner transport for session
+		// creation and re-wrap afterward so the CA bundle is honored.
+		googleAuthRT = httpClient.Transport.(*GoogleAuthRoundTripper)
+		httpClient.Transport = googleAuthRT.transport
 	}
 
 	awsCfg = awsCfg.
@@ -1269,6 +1276,13 @@ func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	if googleAuthRT != nil {
+		// Re-wrap, adopting whatever transport the SDK installed (e.g. with
+		// AWS_CA_BUNDLE RootCAs applied).
+		googleAuthRT.transport = httpClient.Transport
+		httpClient.Transport = googleAuthRT
 	}
 
 	// get region of the bucket and create session accordingly. if the region
