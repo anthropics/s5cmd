@@ -1472,6 +1472,10 @@ func (sc *SessionCache) newSession(ctx context.Context, opts Options) (*session.
 		return nil, err
 	}
 
+	// Wrap before region detection so the GetBucketRegion HeadBucket (when
+	// AWS_REGION is unset) also resolves through the disk cache.
+	maybeWrapWithDiskCache(sess, opts)
+
 	// get region of the bucket and create session accordingly. if the region
 	// is not provided, it means we want region-independent session
 	// for operations such as listing buckets, making a new bucket etc.
