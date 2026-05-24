@@ -59,7 +59,12 @@ func NewLocalClient(opts Options) *Filesystem {
 	return &Filesystem{dryRun: opts.DryRun}
 }
 
-func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, error) {
+func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (Storage, error) {
+	// If gRPC is enabled and this is a GCS URL, use the native GCS client
+	if opts.UseGRPC && url.Scheme == "gs" {
+		return NewGRPCClient(ctx, opts)
+	}
+
 	newOpts := Options{
 		MaxRetries:             opts.MaxRetries,
 		NoSuchUploadRetryCount: opts.NoSuchUploadRetryCount,
@@ -75,6 +80,7 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, erro
 		bucket:                 url.Bucket,
 		region:                 opts.region,
 		AuthGoogleADC:          opts.AuthGoogleADC,
+		UseGRPC:                opts.UseGRPC,
 		RetryForbidden:         opts.RetryForbidden,
 	}
 
@@ -104,6 +110,7 @@ type Options struct {
 	bucket                 string
 	region                 string
 	AuthGoogleADC          bool
+	UseGRPC                bool
 	RetryForbidden         bool
 }
 

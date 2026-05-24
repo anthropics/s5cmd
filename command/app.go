@@ -96,6 +96,10 @@ var app = &cli.App{
 			Usage: "inject the authorization bearer token as a request header using Google Application Default Credentials. Set automatically if a file URI starts with gs:// and no endpoint is set",
 		},
 		&cli.BoolFlag{
+			Name:  "use-grpc",
+			Usage: "use gRPC for Google Cloud Storage operations (requires Google Cloud Storage client library v1.46.0+)",
+		},
+		&cli.BoolFlag{
 			Name:  "retry-on-forbidden",
 			Usage: "retry for Forbidden error code",
 		},
@@ -245,6 +249,7 @@ func NewStorageOpts(c *cli.Context) storage.Options {
 		LogLevel:               log.LevelFromString(c.String("log")),
 		NoSuchUploadRetryCount: c.Int("no-such-upload-retry-count"),
 		AuthGoogleADC:          c.Bool("auth-google-adc"),
+		UseGRPC:                c.Bool("use-grpc"),
 		RetryForbidden:         c.Bool("retry-on-forbidden"),
 	}
 }
