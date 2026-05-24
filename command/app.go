@@ -3,10 +3,9 @@ package command
 import (
 	"context"
 	"fmt"
+	"github.com/urfave/cli/v2"
 	"os"
 	"strings"
-
-	"github.com/urfave/cli/v2"
 
 	"github.com/peak/s5cmd/v2/log"
 	"github.com/peak/s5cmd/v2/log/stat"
@@ -44,7 +43,7 @@ var app = &cli.App{
 		},
 		&cli.StringFlag{
 			Name:    "endpoint-url",
-			Usage:   "override default S3 host for custom services",
+			Usage:   "override default S3 host for custom services. if you set this, it will __override__ the s3/gcs specific defaults and be used everywhere.",
 			EnvVars: []string{"S3_ENDPOINT_URL"},
 		},
 		&cli.BoolFlag{
@@ -99,6 +98,22 @@ var app = &cli.App{
 			Name:  "retry-on-forbidden",
 			Usage: "retry for Forbidden error code",
 		},
+		&cli.StringFlag{
+			Name:  "s3-endpoint-url",
+			Usage: "set an s3-specific endpoint URL. will only be used if --endpoint-url is not set.",
+		},
+		&cli.StringFlag{
+			Name:  "gcs-endpoint-url",
+			Usage: "set an gcs-specific endpoint URL. this is set by default to https://storage.googleapis.com. will only be used if --endpoint-url is not set.",
+		},
+		&cli.StringFlag{
+			Name:  "gcs-credentials-file",
+			Usage: "use the specified credentials file instead of the default credentials file",
+		},
+		&cli.StringFlag{
+			Name:  "s3-credentials-file",
+			Usage: "use the specified credentials file instead of the default credentials file",
+		},
 	},
 	Before: func(c *cli.Context) error {
 		retryCount := c.Int("retry-count")
@@ -115,66 +130,17 @@ var app = &cli.App{
 			printError(commandFromContext(c), c.Command.Name, err)
 			return err
 		}
-		var hasGs = false
-		var hasS3 = false
-		for _, arg := range c.Args().Slice() {
+		// Allow cross-cloud operations for copy/mv commands
 
-			if strings.HasPrefix(arg, "gs://") {
-				hasGs = true
-			} else if strings.HasPrefix(arg, "s3://") {
-				hasS3 = true
-			}
-		}
-
-		if hasGs && hasS3 {
-			err := fmt.Errorf(`"gs://" and "s3://" URIs cannot be used together`)
-			printError(commandFromContext(c), c.Command.Name, err)
-			return err
-		} else if hasGs && !c.Bool("auth-google-adc") && c.String("endpoint-url") == "" {
-			msg := log.DebugMessage{
-				Command:   commandFromContext(c),
-				Operation: c.Command.Name,
-				Err:       fmt.Sprintf(`Detected Google Cloud Storage URL, setting "auth-google-adc" and "endpoint-url"=%v`, gcsEndpoint),
-			}
-			log.Debug(msg)
-			// enable all of the flags that are required for making requests to Google Cloud Storage
+		c.Set("gcs-endpoint-url", gcsEndpoint)
+		if !c.IsSet("auth-google-adc") {
 			c.Set("auth-google-adc", "true")
-			c.Set("endpoint-url", gcsEndpoint)
-		}
-
-		// Pass no credentials to the AWS client- all bools
-		noCredentialsFlags := []string{"auth-google-adc", "no-sign-request"}
-		// Pass specific credents to the AWS client - all strings
-		credentialsFlags := []string{"profile", "credentials-file"}
-
-		for _, noCredentialsflag := range noCredentialsFlags {
-			for _, credentialsFlag := range credentialsFlags {
-				if c.Bool(noCredentialsflag) && c.String(credentialsFlag) != "" {
-					err := fmt.Errorf(`"%s" and "%s" flags cannot be used together`, noCredentialsflag, credentialsFlag)
-					printError(commandFromContext(c), c.Command.Name, err)
-					return err
-				}
-			}
-		}
-
-		if c.Bool("auth-google-adc") && c.Bool("no-sign-request") {
-			err := fmt.Errorf(`"auth-google-adc" and "no-sign-requests" flags cannot be used together (usually you want to use "auth-google-adc" by itself)`)
-			printError(commandFromContext(c), c.Command.Name, err)
-			return err
-		}
-
-		endpointURL := c.String("endpoint-url")
-		if c.Bool("auth-google-adc") && endpointURL != gcsEndpoint {
-			fmt.Printf("endpoint-url: %s\n", endpointURL)
-			err := fmt.Errorf(`"auth-google-adc" can only be used with --endpoint-url="%s"`, gcsEndpoint)
-			printError(commandFromContext(c), c.Command.Name, err)
-			return err
 		}
 
 		if isStat {
 			stat.InitStat()
 		}
-
+		endpointURL := c.String("endpoint-url")
 		if endpointURL != "" {
 			if !strings.HasPrefix(endpointURL, "http") {
 				err := fmt.Errorf(`bad value for --endpoint-url %v: scheme is missing. Must be of the form http://<hostname>/ or https://<hostname>/`, endpointURL)
@@ -235,6 +201,8 @@ func NewStorageOpts(c *cli.Context) storage.Options {
 	return storage.Options{
 		DryRun:                 c.Bool("dry-run"),
 		Endpoint:               c.String("endpoint-url"),
+		S3Endpoint:             c.String("s3-endpoint-url"),
+		GCSEndpoint:            c.String("gcs-endpoint-url"),
 		MaxRetries:             c.Int("retry-count"),
 		NoSignRequest:          c.Bool("no-sign-request"),
 		NoVerifySSL:            c.Bool("no-verify-ssl"),
@@ -242,9 +210,11 @@ func NewStorageOpts(c *cli.Context) storage.Options {
 		UseListObjectsV1:       c.Bool("use-list-objects-v1"),
 		Profile:                c.String("profile"),
 		CredentialFile:         c.String("credentials-file"),
+		S3CredentialFile:       c.String("s3-credentials-file"),
+		GCSCredentialFile:      c.String("gcs-credentials-file"),
 		LogLevel:               log.LevelFromString(c.String("log")),
 		NoSuchUploadRetryCount: c.Int("no-such-upload-retry-count"),
-		AuthGoogleADC:          c.Bool("auth-google-adc"),
+		UseGoogleADCForGcs:     c.Bool("auth-google-adc"),
 		RetryForbidden:         c.Bool("retry-on-forbidden"),
 	}
 }

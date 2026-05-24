@@ -60,13 +60,14 @@ func NewLocalClient(opts Options) *Filesystem {
 }
 
 func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, error) {
+	// log the opts
 	newOpts := Options{
 		MaxRetries:             opts.MaxRetries,
 		NoSuchUploadRetryCount: opts.NoSuchUploadRetryCount,
 		Endpoint:               opts.Endpoint,
 		NoVerifySSL:            opts.NoVerifySSL,
 		DryRun:                 opts.DryRun,
-		NoSignRequest:          opts.NoSignRequest || opts.AuthGoogleADC,
+		NoSignRequest:          opts.NoSignRequest,
 		UseListObjectsV1:       opts.UseListObjectsV1,
 		RequestPayer:           opts.RequestPayer,
 		Profile:                opts.Profile,
@@ -76,11 +77,24 @@ func NewRemoteClient(ctx context.Context, url *url.URL, opts Options) (*S3, erro
 		region:                 opts.region,
 		AuthGoogleADC:          opts.AuthGoogleADC,
 		RetryForbidden:         opts.RetryForbidden,
+		S3Endpoint:             opts.S3Endpoint,
+		GCSEndpoint:            opts.GCSEndpoint,
+		UseGoogleADCForGcs:     opts.UseGoogleADCForGcs,
+		S3CredentialFile:       opts.S3CredentialFile,
+		GCSCredentialFile:      opts.GCSCredentialFile,
 	}
+	newOpts.fixForUrl(url)
+
+	log.Debug(
+		log.DebugMessage{
+			Operation: "storage.NewRemoteClient",
+			Command:   fmt.Sprintf("client options for url %s: %+v", url.String(), newOpts),
+			Err:       "",
+		},
+	)
 
 	return newS3Storage(ctx, newOpts)
 }
-
 func NewClient(ctx context.Context, url *url.URL, opts Options) (Storage, error) {
 	if url.IsRemote() {
 		return NewRemoteClient(ctx, url, opts)
@@ -105,10 +119,38 @@ type Options struct {
 	region                 string
 	AuthGoogleADC          bool
 	RetryForbidden         bool
+	// all of these are anthropic-specific fields that _mutate_ the rest of the options depending on the url
+	// this is kinda a mess but I don't feel like remaking everything so whatever
+	S3Endpoint         string
+	GCSEndpoint        string
+	S3CredentialFile   string
+	GCSCredentialFile  string
+	UseGoogleADCForGcs bool
 }
 
 func (o *Options) SetRegion(region string) {
 	o.region = region
+}
+
+func (o *Options) fixForUrl(url *url.URL) {
+	if url.Scheme == "s3" {
+		if o.Endpoint == "" {
+			o.Endpoint = o.S3Endpoint
+		}
+		if o.CredentialFile == "" {
+			o.CredentialFile = o.S3CredentialFile
+		}
+	} else if url.Scheme == "gs" {
+		if o.Endpoint == "" {
+			o.Endpoint = o.GCSEndpoint
+		}
+		o.CredentialFile = o.GCSCredentialFile
+		o.Profile = ""
+		o.NoSignRequest = true
+		if o.UseGoogleADCForGcs {
+			o.AuthGoogleADC = true
+		}
+	}
 }
 
 // Object is a generic type which contains metadata for storage items.

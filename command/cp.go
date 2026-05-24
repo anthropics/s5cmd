@@ -327,6 +327,23 @@ type Copy struct {
 	storageOpts storage.Options
 }
 
+// enum for cloud provider
+func (c Copy) SrcOpts() storage.Options {
+	newOpts := c.storageOpts
+	if c.srcRegion != "" {
+		newOpts.SetRegion(c.srcRegion)
+	}
+	return newOpts
+}
+
+func (c Copy) DstOpts() storage.Options {
+	newOpts := c.storageOpts
+	if c.dstRegion != "" {
+		newOpts.SetRegion(c.dstRegion)
+	}
+	return newOpts
+}
+
 // NewCopy creates Copy from cli.Context.
 func NewCopy(c *cli.Context, deleteSource bool) (*Copy, error) {
 	fullCommand := commandFromContext(c)
@@ -358,7 +375,6 @@ func NewCopy(c *cli.Context, deleteSource bool) (*Copy, error) {
 		printError(fullCommand, c.Command.Name, err)
 		return nil, err
 	}
-
 	return &Copy{
 		src:          src,
 		dst:          dst,
@@ -408,11 +424,7 @@ increase the open file limit or try to decrease the number of workers with
 // Run starts copying given source objects to destination.
 func (c Copy) Run(ctx context.Context) error {
 	// override source region if set
-	if c.srcRegion != "" {
-		c.storageOpts.SetRegion(c.srcRegion)
-	}
-
-	client, err := storage.NewClient(ctx, c.src, c.storageOpts)
+	client, err := storage.NewClient(ctx, c.src, c.SrcOpts())
 	if err != nil {
 		printError(c.fullCommand, c.op, err)
 		return err
@@ -609,12 +621,12 @@ func (c Copy) prepareUploadTask(
 
 // doDownload is used to fetch a remote object and save as a local object.
 func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) error {
-	srcClient, err := storage.NewRemoteClient(ctx, srcurl, c.storageOpts)
+	srcClient, err := storage.NewRemoteClient(ctx, srcurl, c.SrcOpts())
 	if err != nil {
 		return err
 	}
 
-	dstClient := storage.NewLocalClient(c.storageOpts)
+	dstClient := storage.NewLocalClient(c.DstOpts())
 
 	err = c.shouldOverride(ctx, srcurl, dsturl)
 	if err != nil {
@@ -668,9 +680,8 @@ func (c Copy) doDownload(ctx context.Context, srcurl *url.URL, dsturl *url.URL) 
 
 	return nil
 }
-
 func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, extradata map[string]string) error {
-	srcClient := storage.NewLocalClient(c.storageOpts)
+	srcClient := storage.NewLocalClient(c.SrcOpts())
 
 	file, err := srcClient.Open(srcurl.Absolute())
 	if err != nil {
@@ -687,11 +698,7 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, ex
 		return err
 	}
 
-	// override destination region if set
-	if c.dstRegion != "" {
-		c.storageOpts.SetRegion(c.dstRegion)
-	}
-	dstClient, err := storage.NewRemoteClient(ctx, dsturl, c.storageOpts)
+	dstClient, err := storage.NewRemoteClient(ctx, dsturl, c.DstOpts())
 	if err != nil {
 		return err
 	}
@@ -751,12 +758,58 @@ func (c Copy) doUpload(ctx context.Context, srcurl *url.URL, dsturl *url.URL, ex
 	return nil
 }
 
-func (c Copy) doCopy(ctx context.Context, srcurl, dsturl *url.URL, extradata map[string]string) error {
-	// override destination region if set
-	if c.dstRegion != "" {
-		c.storageOpts.SetRegion(c.dstRegion)
+// isCrossCloudCopy checks if the source and destination are from different cloud providers
+func isCrossCloudCopy(srcurl, dsturl *url.URL) bool {
+	return srcurl.IsRemote() && dsturl.IsRemote() && (srcurl.Scheme != dsturl.Scheme)
+}
+
+// doCrossCloudCopy handles copying between different cloud providers by downloading to temp then uploading
+func (c Copy) doCrossCloudCopy(ctx context.Context, srcurl, dsturl *url.URL, extradata map[string]string) error {
+	// Create a temporary file using the system's temp directory
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("s5cmd-temp-%d-%s", os.Getpid(), srcurl.Base()))
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %v", err)
 	}
-	dstClient, err := storage.NewClient(ctx, dsturl, c.storageOpts)
+	tempPath := tempFile.Name()
+	tempFile.Close()          // Close it immediately, we just need the name
+	defer os.Remove(tempPath) // Clean up the temp file when done
+
+	// Create a temporary local URL
+	tempURL, err := url.New(tempPath)
+	if err != nil {
+		return err
+	}
+	err = c.doDownload(ctx, srcurl, tempURL)
+	if err != nil {
+		return fmt.Errorf("failed to download from source: %v", err)
+	}
+
+	// Step 2: Upload from temp file to destination
+	fmt.Printf("cp %s %s\n", tempPath, dsturl)
+	// Set up options for destination (S3 or GS)
+	err = c.doUpload(ctx, tempURL, dsturl, extradata)
+	if err != nil {
+		return fmt.Errorf("failed to upload to destination: %v", err)
+	}
+	if c.deleteSource {
+		srcClient, err := storage.NewClient(ctx, srcurl, c.SrcOpts())
+		if err != nil {
+			return err
+		}
+		if err := srcClient.Delete(ctx, srcurl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c Copy) doCopy(ctx context.Context, srcurl, dsturl *url.URL, extradata map[string]string) error {
+	// Check if this is a cross-cloud copy (different providers)
+	if isCrossCloudCopy(srcurl, dsturl) {
+		return c.doCrossCloudCopy(ctx, srcurl, dsturl, extradata)
+	}
+
+	dstClient, err := storage.NewClient(ctx, dsturl, c.DstOpts())
 	if err != nil {
 		return err
 	}
@@ -790,7 +843,7 @@ func (c Copy) doCopy(ctx context.Context, srcurl, dsturl *url.URL, extradata map
 	}
 
 	if c.deleteSource {
-		srcClient, err := storage.NewClient(ctx, srcurl, c.storageOpts)
+		srcClient, err := storage.NewClient(ctx, srcurl, c.SrcOpts())
 		if err != nil {
 			return err
 		}
@@ -824,7 +877,7 @@ func (c Copy) shouldOverride(ctx context.Context, srcurl *url.URL, dsturl *url.U
 		return nil
 	}
 
-	srcClient, err := storage.NewClient(ctx, srcurl, c.storageOpts)
+	srcClient, err := storage.NewClient(ctx, srcurl, c.SrcOpts())
 	if err != nil {
 		return err
 	}
@@ -834,7 +887,7 @@ func (c Copy) shouldOverride(ctx context.Context, srcurl *url.URL, dsturl *url.U
 		return err
 	}
 
-	dstClient, err := storage.NewClient(ctx, dsturl, c.storageOpts)
+	dstClient, err := storage.NewClient(ctx, dsturl, c.DstOpts())
 	if err != nil {
 		return err
 	}
