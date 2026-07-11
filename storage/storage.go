@@ -122,7 +122,7 @@ type Object struct {
 	Err          error        `json:"error,omitempty"`
 	retryID      string
 
-	// the VersionID field exist only for JSON Marshall, it must not be used for
+	// the VersionID field exists only for JSON Marshal, it must not be used for
 	// any other purpose. URL.VersionID must be used instead.
 	VersionID string `json:"version_id,omitempty"`
 }
