@@ -34,7 +34,7 @@ Examples:
 	3. List all objects in a bucket
 		 > s5cmd {{.HelpName}} "s3://bucket/*"
 
-	4. List all objects that matches a wildcard
+	4. List all objects that match a wildcard
 		 > s5cmd {{.HelpName}} "s3://bucket/prefix/*/*.gz"
 
 	5. List all objects in a public bucket
@@ -49,7 +49,7 @@ Examples:
 	8. List all versions of an object in the bucket
 		 > s5cmd {{.HelpName}} --all-versions s3://bucket/object
 
-	9. List all versions of all objects that starts with a prefix in the bucket
+	9. List all versions of all objects that start with a prefix in the bucket
 		 > s5cmd {{.HelpName}} --all-versions "s3://bucket/prefix*"
 		
 	10. List all versions of all objects in the bucket
@@ -254,7 +254,7 @@ func (l ListMessage) String() string {
 		return l.Object.URL.String()
 	}
 	var etag string
-	// date and storage fiels
+	// date and storage fields
 	var listFormat = "%19s %2s"
 
 	// align etag
